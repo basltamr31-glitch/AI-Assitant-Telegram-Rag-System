@@ -181,6 +181,34 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-010 — Self-hosted n8n, with a tunnel for inbound webhooks
+
+**Date:** 2026-09-11 · **Status:** Accepted
+
+**Decision.** n8n runs as the container in `docker-compose.yml`, not on n8n
+Cloud. Telegram reaches it through a Cloudflare tunnel introduced in Phase 3.
+
+**Reason.** Telegram delivers updates only to a public HTTPS URL, and the
+laptop has none — so exactly one tunnel is required either way. The question
+is which side it sits on. Self-hosting puts the tunnel in front of **n8n**,
+leaving the Python API bound to localhost and unreachable from the internet.
+n8n Cloud would invert this: the public URL comes free, but the Python API
+must then be exposed to the open internet for n8n to call it — a strictly
+worse security position for a development machine. Self-hosting is also free
+indefinitely and is what production will run, so development mirrors it.
+
+**Alternatives considered.**
+- *n8n Cloud* — frictionless in Phases 2–3, but a time-limited trial then
+  roughly €20–24/month, and it forces the Python API to be publicly exposed.
+- *Cloud now, migrate at Phase 4* — viable, since workflows export as JSON,
+  but it means learning two deployment models to reach the same place.
+
+**Tradeoffs.** One extra dependency (`cloudflared`) and one extra concept
+(tunnels) in Phase 3. Both are needed for production regardless, so the cost
+is paid once rather than avoided.
+
+---
+
 ## ADR-009 — Container images are unpinned in development
 
 **Date:** 2026-09-08 · **Status:** Accepted, revisit in Phase 15
