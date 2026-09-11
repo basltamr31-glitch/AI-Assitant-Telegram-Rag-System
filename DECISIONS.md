@@ -181,9 +181,44 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-011 — n8n Cloud during development, driven through MCP
+
+**Date:** 2026-09-11 · **Status:** Accepted (supersedes ADR-010 for development)
+
+**Decision.** Development uses the n8n Cloud instance at
+`basltamr.app.n8n.cloud`, which Claude can build in directly through the n8n
+MCP connector. The self-hosted container stays defined in
+`docker-compose.yml` but is stopped; Phase 15 migrates back to it.
+
+**Reason — new information.** ADR-010 was decided before an n8n MCP server
+became available in the session. That connector changes what is possible:
+Claude can now author, validate and version workflows programmatically, but
+only against n8n Cloud — a cloud service cannot reach `localhost:5678`. This
+turns workflow construction from a manual UI exercise into read-and-modify
+learning: a working workflow to inspect, break and repair, which is faster
+than assembling nodes in an unfamiliar tool.
+
+Telegram also reaches n8n Cloud with no tunnel, so Phase 3 stays focused on
+Telegram itself rather than on networking.
+
+**Alternatives considered.**
+- *Self-hosted (ADR-010)* — free indefinitely and identical to production,
+  but every workflow is hand-built and Phase 3 needs a tunnel first.
+- *Both in parallel* — deepest learning, roughly double the work.
+
+**Tradeoffs.** Two real costs. (1) Phase 4 must expose the local Python API
+to n8n Cloud through a tunnel, which is a weaker security position than
+ADR-010's — mitigated by the `X-API-Key` header already in `config.py`, and
+by binding the tunnel to a single port. (2) n8n Cloud is a time-limited trial,
+then roughly €22/month. Workflows are exported to `n8n/*.json` in Git, so
+migrating back to the container is an import, not a rebuild.
+
+---
+
 ## ADR-010 — Self-hosted n8n, with a tunnel for inbound webhooks
 
-**Date:** 2026-09-11 · **Status:** Accepted
+**Date:** 2026-09-11 · **Status:** Superseded by ADR-011 for development;
+still the target for production (Phase 15)
 
 **Decision.** n8n runs as the container in `docker-compose.yml`, not on n8n
 Cloud. Telegram reaches it through a Cloudflare tunnel introduced in Phase 3.

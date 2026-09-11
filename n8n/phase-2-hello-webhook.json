@@ -1,0 +1,84 @@
+{
+  "name": "Phase 2 - Hello Webhook",
+  "nodes": [
+    {
+      "id": "298027ae-433b-4edf-9ea2-cb18daa4555a",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "webhookId": "b529c327-651f-4ec5-8a81-54b1e33e9d81",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hello",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "b56a538b-9d83-49b3-b41c-3a47fb4efc40",
+      "name": "Build Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [224, 0],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "greeting",
+              "name": "greeting",
+              "value": "=Hello, {{ $json.body.name }}!",
+              "type": "string"
+            },
+            {
+              "id": "received_message",
+              "name": "received_message",
+              "value": "={{ $json.body.message }}",
+              "type": "string"
+            },
+            {
+              "id": "message_length",
+              "name": "message_length",
+              "value": "={{ $json.body.message.length }}",
+              "type": "number"
+            },
+            {
+              "id": "processed_at",
+              "name": "processed_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "name": "source",
+              "value": "n8n-phase-2",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6d45bd3e-466a-47bf-bf3c-f2e27fcd2444",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [448, 0],
+      "parameters": {
+        "respondWith": "firstIncomingItem"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Build Reply", "type": "main", "index": 0 }]]
+    },
+    "Build Reply": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
