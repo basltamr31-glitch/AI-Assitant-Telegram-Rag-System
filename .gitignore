@@ -1,0 +1,28 @@
+# --- Secrets: NEVER commit these -------------------------------------------
+.env
+*.pem
+*.key
+
+# --- Python ----------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Local data ------------------------------------------------------------
+# Source documents are yours, not the repo's. Keep the folder, ignore contents.
+data/documents/*
+!data/documents/.gitkeep
+data/exports/
+
+# --- Editors / OS ----------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

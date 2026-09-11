@@ -1,0 +1,22 @@
+# Runtime dependencies.
+# We add to this file phase by phase, never "just in case" - every line here
+# is code you must understand, update, and secure.
+
+# --- Phase 1: configuration --------------------------------------------------
+pydantic>=2.7            # data validation + typed models
+pydantic-settings>=2.2   # loads .env into a validated Settings object
+
+# --- Phase 1: infrastructure clients -----------------------------------------
+qdrant-client>=1.9       # talks to the Qdrant vector database
+psycopg[binary]>=3.1     # PostgreSQL driver (v3; "binary" = no compiler needed)
+
+# --- Phase 1: cross-cutting --------------------------------------------------
+structlog>=24.1          # structured (JSON) logging
+httpx>=0.27              # modern HTTP client, sync + async
+
+# Added later:
+#   Phase 4  fastapi, uvicorn
+#   Phase 5  anthropic
+#   Phase 6  pypdf, python-docx, openpyxl, python-pptx, beautifulsoup4,
+#            sentence-transformers
+#   Phase 11 mcp
