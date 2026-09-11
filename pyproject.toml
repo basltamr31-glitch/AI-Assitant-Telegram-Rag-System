@@ -1,0 +1,46 @@
+# =============================================================================
+#  Project metadata and tooling configuration
+# =============================================================================
+#  This file exists mainly so that `pip install -e .` can register the `app`
+#  package with the virtual environment. Once installed in "editable" mode,
+#  `import app.config` works from ANY directory - scripts, tests, the API, the
+#  MCP server - and it still points at the source files, so your edits take
+#  effect immediately without reinstalling.
+#
+#  Dependencies deliberately stay in requirements.txt rather than being listed
+#  here. This is an application, not a library: one obvious file to read, and
+#  no risk of two lists drifting apart.
+# =============================================================================
+
+[project]
+name = "telegram-ai-assistant"
+version = "0.1.0"
+description = "A RAG-powered AI assistant delivered through Telegram"
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# --- pytest ------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Show the reason for every skipped/failed test, and keep output short.
+addopts = "-q --strict-markers"
+
+# --- ruff (linter + formatter, replaces flake8 + black + isort) ---------------
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports, undefined names)
+    "I",   # isort (import ordering)
+    "B",   # bugbear (likely bugs)
+    "UP",  # pyupgrade (modern syntax)
+]
