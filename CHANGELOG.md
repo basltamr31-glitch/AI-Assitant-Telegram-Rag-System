@@ -6,6 +6,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 3] — 2026-09-19 — Telegram bot connected (in progress)
+
+### Added
+- `n8n/phase-3-telegram-echo.json` — Telegram Trigger → Extract Message →
+  Send Reply. The bot echoes any message back with the sender's user ID,
+  chat ID and message number.
+- `n8n_base_url` in `app/config.py` — where n8n actually runs, typed like
+  every other setting. Added to `.env` and `.env.example`.
+
+### Changed
+- `scripts/check_env.py` — the n8n check reads `settings.n8n_base_url`
+  instead of a hardcoded `localhost:5678`, and probes `/rest/settings`
+  (~1s) rather than `/`, which streams the whole editor SPA and timed out.
+
+### Notes
+- The bot token is stored as an n8n **credential**, never in the workflow
+  JSON, so `n8n/*.json` stays safe to commit.
+- User text is HTML-escaped before it enters the reply, because the reply is
+  sent with `parse_mode: HTML`. Output encoding, not input filtering.
+- `appendAttribution` is off — otherwise n8n appends its own advert to every
+  message the bot sends.
+
+---
+
+## [Phase 2] — 2026-09-11 — n8n fundamentals
+
+### Added
+- `n8n/phase-2-hello-webhook.json` — Webhook (`POST /hello`) → Build Reply →
+  Respond to Webhook. Teaches triggers, the item model, expressions and the
+  `=` prefix that separates an expression from a literal.
+
+### Changed
+- ADR-011 supersedes ADR-010 for development: n8n runs on n8n Cloud, driven
+  through the n8n MCP connector. The container stays defined but stopped.
+
+---
+
 ## [Phase 1] — 2026-09-08 — Development environment
 
 ### Added

@@ -1,0 +1,67 @@
+{
+  "name": "Phase 3 - Telegram Echo",
+  "nodes": [
+    {
+      "id": "b103d2c1-2f59-4d47-9ad8-4a32387c1bcc",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [0, 0],
+      "webhookId": "49fa5b14-fef7-477f-a14c-0dde729d2359",
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "cf9916cb-4d4b-45d6-ab51-409c94d97d6e",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [224, 0],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            { "id": "chat_id", "name": "chat_id", "value": "={{ $json.message.chat.id }}", "type": "number" },
+            { "id": "user_id", "name": "user_id", "value": "={{ $json.message.from.id }}", "type": "number" },
+            { "id": "first_name", "name": "first_name", "value": "={{ $json.message.from.first_name }}", "type": "string" },
+            { "id": "message_id", "name": "message_id", "value": "={{ $json.message.message_id }}", "type": "number" },
+            { "id": "user_text", "name": "user_text", "value": "={{ ($json.message.text || '(no text)').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') }}", "type": "string" },
+            { "id": "received_at", "name": "received_at", "value": "={{ $now.toFormat(\"yyyy-LL-dd HH:mm:ss\") }}", "type": "string" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d5b33a37-c434-4768-80e0-bbe5dd94fcb1",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [448, 0],
+      "webhookId": "c68b72c1-ab84-4099-9d78-f2d289210eda",
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "=✅ <b>Echo from n8n</b>\n\nHello {{ $json.first_name }} — I received:\n<blockquote>{{ $json.user_text }}</blockquote>\n\n<b>Your user ID:</b> <code>{{ $json.user_id }}</code>\n<b>Chat ID:</b> <code>{{ $json.chat_id }}</code>\n<b>Message #:</b> {{ $json.message_id }}\n<b>Processed:</b> {{ $json.received_at }}\n\n<i>Telegram → n8n → Telegram. No Python yet.</i>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [[{ "node": "Extract Message", "type": "main", "index": 0 }]]
+    },
+    "Extract Message": {
+      "main": [[{ "node": "Send Reply", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

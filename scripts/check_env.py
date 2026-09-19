@@ -9,7 +9,7 @@ It verifies four things, independently, and tells you which one failed:
   1. Configuration loads and validates from .env
   2. Qdrant answers on its HTTP API
   3. Postgres accepts a connection and runs a query
-  4. n8n serves its web UI
+  4. n8n serves its web UI (N8N_BASE_URL - see ADR-011)
 
 Testing each component on its own - rather than starting everything and
 seeing whether "it works" - is the debugging habit this whole project is
@@ -83,16 +83,23 @@ def check_postgres() -> bool:
 
 
 def check_n8n() -> bool:
-    url = "http://localhost:5678"
+    # ADR-011: development runs on n8n Cloud, so this is no longer a
+    # hardcoded localhost. Phase 15 points N8N_BASE_URL back at the container.
+    url = get_settings().n8n_base_url.rstrip("/")
     print(f"\n4. n8n  ({url})")
     try:
-        response = httpx.get(url, timeout=10, follow_redirects=True)
+        # /rest/settings is n8n's own API probe: it answers in ~1s on both
+        # Cloud and self-hosted, while "/" streams the whole editor SPA.
+        response = httpx.get(f"{url}/rest/settings", timeout=15, follow_redirects=True)
         print(f"       HTTP {response.status_code} from {response.url}")
-        print(f"{OK} n8n is serving its UI")
+        print(f"{OK} n8n is reachable")
         return True
     except Exception as exc:  # noqa: BLE001
         print(f"{FAIL} {type(exc).__name__}: {exc}")
-        print("       hint: n8n takes ~20s to boot. docker compose logs n8n")
+        if "localhost" in url:
+            print("       hint: n8n takes ~20s to boot. docker compose logs n8n")
+        else:
+            print("       hint: check N8N_BASE_URL in .env and that you are online")
         return False
 
 

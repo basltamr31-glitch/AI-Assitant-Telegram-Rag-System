@@ -9,8 +9,8 @@ is explicitly approved.
 |---|---|---|---|
 | **0** | Requirements, architecture, ADR-001…009 | Architecture approved | ✅ |
 | **1** | venv, Git, structure, `.env`, typed config, `docker-compose.yml` | `check_env.py` passes 4/4 | 🔵 |
-| **2** | n8n fundamentals: trigger, nodes, expressions, credentials, webhook | A manual webhook call returns your own JSON | ⬜ |
-| **3** | Telegram bot via BotFather; n8n echoes messages | You message the bot, it echoes back — no Python yet | ⬜ |
+| **2** | n8n fundamentals: trigger, nodes, expressions, credentials, webhook | A manual webhook call returns your own JSON | ✅ |
+| **3** | Telegram bot via BotFather; n8n echoes messages | You message the bot, it echoes back — no Python yet | 🔵 |
 | **4** | FastAPI service; n8n calls it; `X-API-Key` auth | 🏁 **MILESTONE 1** — full round trip Telegram→n8n→Python→Telegram | ⬜ |
 | **5** | Claude integration, system prompt, token + cost logging | The bot converses. No memory, no knowledge | ⬜ |
 | **6** | Ingestion: loaders → parse → clean → chunk → metadata → embed → store | You inspect your own chunks in the Qdrant dashboard | ⬜ |

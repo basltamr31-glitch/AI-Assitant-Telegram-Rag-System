@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     # ourselves in `telegram_allowed_ids` below.
     telegram_allowed_user_ids: str = ""
 
+    # --- n8n ------------------------------------------------------------------
+    # ADR-011: Cloud during development, back to the container in Phase 15.
+    n8n_base_url: str = "http://localhost:5678"
+
     # --- Qdrant ---------------------------------------------------------------
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "knowledge_base"
@@ -118,6 +122,7 @@ class Settings(BaseSettings):
             "app_env": self.app_env,
             "log_level": self.log_level,
             "api": f"{self.api_host}:{self.api_port}",
+            "n8n_base_url": self.n8n_base_url,
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
             "postgres": f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}",
