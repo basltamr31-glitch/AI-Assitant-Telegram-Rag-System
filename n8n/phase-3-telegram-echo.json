@@ -6,11 +6,24 @@
       "name": "Telegram Trigger",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.5,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "webhookId": "49fa5b14-fef7-477f-a14c-0dde729d2359",
       "parameters": {
-        "updates": ["message"],
-        "additionalFields": {}
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "userIds": "7431125996"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "KqSIsBi58KoIGgMy",
+          "name": "Telegram account"
+        }
       }
     },
     {
@@ -18,20 +31,54 @@
       "name": "Extract Message",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
-      "position": [224, 0],
+      "position": [
+        224,
+        0
+      ],
       "parameters": {
         "mode": "manual",
         "includeOtherFields": false,
         "assignments": {
           "assignments": [
-            { "id": "chat_id", "name": "chat_id", "value": "={{ $json.message.chat.id }}", "type": "number" },
-            { "id": "user_id", "name": "user_id", "value": "={{ $json.message.from.id }}", "type": "number" },
-            { "id": "first_name", "name": "first_name", "value": "={{ $json.message.from.first_name }}", "type": "string" },
-            { "id": "message_id", "name": "message_id", "value": "={{ $json.message.message_id }}", "type": "number" },
-            { "id": "user_text", "name": "user_text", "value": "={{ ($json.message.text || '(no text)').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') }}", "type": "string" },
-            { "id": "received_at", "name": "received_at", "value": "={{ $now.toFormat(\"yyyy-LL-dd HH:mm:ss\") }}", "type": "string" }
+            {
+              "id": "chat_id",
+              "name": "chat_id",
+              "value": "={{ $json.message.chat.id }}",
+              "type": "number"
+            },
+            {
+              "id": "user_id",
+              "name": "user_id",
+              "value": "={{ $json.message.from.id }}",
+              "type": "number"
+            },
+            {
+              "id": "first_name",
+              "name": "first_name",
+              "value": "={{ $json.message.from.first_name }}",
+              "type": "string"
+            },
+            {
+              "id": "message_id",
+              "name": "message_id",
+              "value": "={{ $json.message.message_id }}",
+              "type": "number"
+            },
+            {
+              "id": "user_text",
+              "name": "user_text",
+              "value": "={{ ($json.message.text || '(no text)').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') }}",
+              "type": "string"
+            },
+            {
+              "id": "received_at",
+              "name": "received_at",
+              "value": "={{ $now.toFormat(\"yyyy-LL-dd HH:mm:ss\") }}",
+              "type": "string"
+            }
           ]
-        }
+        },
+        "options": {}
       }
     },
     {
@@ -39,7 +86,10 @@
       "name": "Send Reply",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [448, 0],
+      "position": [
+        448,
+        0
+      ],
       "webhookId": "c68b72c1-ab84-4099-9d78-f2d289210eda",
       "parameters": {
         "resource": "message",
@@ -50,18 +100,41 @@
           "appendAttribution": false,
           "parse_mode": "HTML"
         }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "KqSIsBi58KoIGgMy",
+          "name": "Telegram account"
+        }
       }
     }
   ],
   "connections": {
     "Telegram Trigger": {
-      "main": [[{ "node": "Extract Message", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Extract Message": {
-      "main": [[{ "node": "Send Reply", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "binaryMode": "separate"
   }
 }

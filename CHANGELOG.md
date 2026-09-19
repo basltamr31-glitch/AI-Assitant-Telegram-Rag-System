@@ -20,9 +20,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   instead of a hardcoded `localhost:5678`, and probes `/rest/settings`
   (~1s) rather than `/`, which streams the whole editor SPA and timed out.
 
+### Security
+- The Telegram Trigger now carries `additionalFields.userIds`, so n8n drops
+  updates from anyone but the owner before any downstream node runs. The same
+  id is set in `TELEGRAM_ALLOWED_USER_IDS` for the Python side in Phase 4 —
+  two independent layers, neither trusting the other.
+
 ### Notes
 - The bot token is stored as an n8n **credential**, never in the workflow
-  JSON, so `n8n/*.json` stays safe to commit.
+  JSON, so `n8n/*.json` stays safe to commit. The JSON holds only the
+  credential's id and name, which are references, not secrets.
+- Updating a workflow through the API writes a new **draft** version and
+  leaves `activeVersionId` untouched — the live bot keeps running the old
+  version until the new one is published. Editing is not deploying.
 - User text is HTML-escaped before it enters the reply, because the reply is
   sent with `parse_mode: HTML`. Output encoding, not input filtering.
 - `appendAttribution` is off — otherwise n8n appends its own advert to every
