@@ -19,7 +19,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   an unexpected field is a loud 422 rather than a silent drop.
 - `app/api/responder.py` — deterministic replies (`/start`, `/help`, `/ping`,
   `/whoami`, echo). This is the seam Phase 5 replaces with Claude.
-- `tests/test_api.py` — 20 tests, mostly about refusal: missing key, wrong
+- `tests/test_api.py` — 22 tests, mostly about refusal: missing key, wrong
   key, key prefix, unconfigured key, stranger with a valid key, unknown
   fields, HTML injection.
 - `fastapi` and `uvicorn[standard]` in `requirements.txt`.
