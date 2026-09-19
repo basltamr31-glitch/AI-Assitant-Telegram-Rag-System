@@ -59,7 +59,10 @@ three are.
 uvicorn app.api.main:app --reload
 
 # b. The tunnel that lets n8n Cloud reach it (ADR-012)
-ngrok http 8000 --domain=<your-reserved-domain>.ngrok-free.app
+#    One-off setup:  scoop install ngrok
+#                    ngrok config add-authtoken <token from the ngrok dashboard>
+#    ngrok 3.39 takes --url, not the older --domain.
+ngrok http 8000 --url=https://<your-reserved-domain>.ngrok-free.app
 
 # c. Nothing to run for n8n - it is Cloud-hosted. Just make sure the
 #    workflow is Active.
