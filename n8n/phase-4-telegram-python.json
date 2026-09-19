@@ -1,0 +1,95 @@
+{
+  "name": "Phase 4 - Telegram via Python",
+  "nodes": [
+    {
+      "id": "a678d4f4-2538-4cec-b326-9600bbed5c35",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [0, 0],
+      "webhookId": "c78859fd-fe98-4456-a1cb-846dc5f04525",
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": { "userIds": "7431125996" }
+      },
+      "credentials": {
+        "telegramApi": { "id": "KqSIsBi58KoIGgMy", "name": "Telegram account" }
+      }
+    },
+    {
+      "id": "e0ac2e54-e8bb-46cc-b0a2-1961913bfe4e",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [224, 0],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            { "id": "chat_id", "name": "chat_id", "value": "={{ $json.message.chat.id }}", "type": "number" },
+            { "id": "user_id", "name": "user_id", "value": "={{ $json.message.from.id }}", "type": "number" },
+            { "id": "first_name", "name": "first_name", "value": "={{ $json.message.from.first_name || '' }}", "type": "string" },
+            { "id": "message_id", "name": "message_id", "value": "={{ $json.message.message_id }}", "type": "number" },
+            { "id": "text", "name": "text", "value": "={{ $json.message.text || '' }}", "type": "string" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "687427e0-68e1-4495-9047-86e216cddfc0",
+      "name": "Call Assistant API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [448, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://handbook-directory-expose.ngrok-free.dev/v1/chat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            { "name": "ngrok-skip-browser-warning", "value": "true" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, user_id: $json.user_id, first_name: $json.first_name, text: $json.text, message_id: $json.message_id }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      }
+    },
+    {
+      "id": "bfd056af-efdc-4f7f-a864-787dad2d4d89",
+      "name": "Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [672, 0],
+      "webhookId": "a827a3d6-538e-40ba-919e-3a6831f80f68",
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Extract Message').item.json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "={{ $json.parse_mode }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": { "id": "KqSIsBi58KoIGgMy", "name": "Telegram account" }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": { "main": [[{ "node": "Extract Message", "type": "main", "index": 0 }]] },
+    "Extract Message": { "main": [[{ "node": "Call Assistant API", "type": "main", "index": 0 }]] },
+    "Call Assistant API": { "main": [[{ "node": "Send Reply", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

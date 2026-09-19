@@ -29,7 +29,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   on this machine and can reach loopback; `0.0.0.0` would also have published
   the API to every device on whatever network the laptop joined.
 
+### Added (n8n side)
+- `n8n/phase-4-telegram-python.json` — Telegram Trigger → Extract Message →
+  Call Assistant API → Send Reply. The HTTP Request node sends the API key as
+  a Header Auth **credential**, so the exported JSON carries no secret.
+- `ngrok-skip-browser-warning: true` on that request. Without it ngrok's free
+  tier answers browser-ish callers with an HTML interstitial
+  (`ERR_NGROK_6024`) instead of the JSON body — confirmed by hand before
+  wiring it up.
+
 ### Notes
+- `Extract Message` now passes the message text through **raw**. Python
+  escapes it where it becomes HTML; escaping in both places would
+  double-encode `<b>` into `&amp;lt;b&amp;gt;`. Escape once, at the point of use.
+- The body is built with `JSON.stringify(...)` rather than concatenated by
+  hand, so a message containing a quote or a newline cannot break it.
+- `Send Reply` reads `chat_id` through `$('Extract Message').item.json`,
+  because after the HTTP node `$json` is the API's response and no longer
+  carries it.
 - The message text is deliberately **not** logged — only its length. Logs get
   shipped and shared; the conversation is the private part.
 - Interactive docs (`/docs`, `/openapi.json`) are served in development only.
