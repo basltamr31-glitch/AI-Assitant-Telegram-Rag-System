@@ -42,18 +42,36 @@ pip install -r requirements-dev.txt
 # 3. Configure
 copy .env.example .env               # then fill in the blanks
 
-# 4. Start infrastructure
-docker compose up -d
+# 4. Start infrastructure (Postgres + Qdrant; n8n runs on Cloud, see ADR-011)
+docker compose up -d postgres qdrant
 
 # 5. Verify everything works
 python scripts/check_env.py
+```
+
+### Running the assistant (from Phase 4)
+
+Three processes, each in its own terminal. The bot is only alive while all
+three are.
+
+```bash
+# a. The internal API
+uvicorn app.api.main:app --reload
+
+# b. The tunnel that lets n8n Cloud reach it (ADR-012)
+ngrok http 8000 --domain=<your-reserved-domain>.ngrok-free.app
+
+# c. Nothing to run for n8n - it is Cloud-hosted. Just make sure the
+#    workflow is Active.
 ```
 
 Services once running:
 
 | Service | URL |
 |---|---|
-| n8n | http://localhost:5678 |
+| n8n | `N8N_BASE_URL` in `.env` (Cloud during development) |
+| Internal API | http://127.0.0.1:8000 - `/healthz` needs no key |
+| API docs | http://127.0.0.1:8000/docs (development only) |
 | Qdrant dashboard | http://localhost:6333/dashboard |
 | Postgres | localhost:5432 |
 
@@ -69,4 +87,4 @@ Services once running:
 
 ## Project status
 
-Phase 1 of 15. See `ROADMAP.md`.
+Phase 4 of 15. See `ROADMAP.md`.

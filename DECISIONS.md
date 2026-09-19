@@ -181,6 +181,45 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-012 — ngrok with a reserved domain is the development tunnel
+
+**Date:** 2026-09-19 · **Status:** Accepted, revisit in Phase 15
+
+**Decision.** n8n Cloud reaches the local FastAPI service through an ngrok
+tunnel bound to a reserved (static) domain on the free tier. The API binds to
+`127.0.0.1`; only ngrok connects to it, and only from this machine.
+
+**Reason.** ADR-011 accepted that n8n Cloud would force the Python API to be
+publicly reachable. This is where that bill comes due. Among the ways to pay
+it, the deciding factor was not security — the three options expose the same
+surface — but **URL stability**. A Cloudflare quick tunnel issues a new
+hostname on every start, and the n8n HTTP Request node hardcodes its URL, so
+every restart of uvicorn would mean editing the workflow. Phases 5 through 10
+restart that server constantly. A reserved domain is configured once.
+
+**Alternatives considered.**
+- *Cloudflare quick tunnel* — no account at all, but a new URL each run. A
+  named Cloudflare tunnel fixes that and needs a domain we do not own.
+- *Revert to self-hosted n8n (ADR-010)* — genuinely the most secure: the
+  tunnel would front n8n, and Python would never leave loopback. Rejected
+  because it also removes the n8n MCP connector, which only reaches the Cloud
+  instance and has been the main teaching accelerator. A security decision
+  traded knowingly for tooling, not by accident.
+
+**What makes the exposure acceptable.** Four independent things, none of which
+is trusted alone:
+1. `X-API-Key`, compared in constant time; an unset key fails closed.
+2. The Telegram allowlist, enforced in n8n *and* again in Python.
+3. `api_host = 127.0.0.1`, so nothing is served without the tunnel running.
+4. `/docs` and `/openapi.json` are development-only, so a stranger gets no map.
+
+**Tradeoffs.** An ngrok account and a process that must be running for the bot
+to work — when the tunnel is down, the bot is down. The free tier also allows
+one agent at a time. Phase 15 removes the tunnel entirely: the API and n8n
+will sit on the same private network, and this ADR retires with it.
+
+---
+
 ## ADR-011 — n8n Cloud during development, driven through MCP
 
 **Date:** 2026-09-11 · **Status:** Accepted (supersedes ADR-010 for development)
