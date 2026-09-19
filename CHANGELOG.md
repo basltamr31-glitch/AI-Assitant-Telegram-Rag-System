@@ -6,6 +6,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 4] — 2026-09-19 — The internal API (in progress)
+
+### Added
+- `app/api/main.py` — FastAPI app factory, `GET /healthz` (unauthenticated,
+  so "is it up?" never needs the secret) and `POST /v1/chat` behind the key.
+  Middleware stamps every request with a trace id, binds it to structlog's
+  contextvars so nested log lines inherit it, and returns it as `X-Trace-Id`.
+- `app/api/security.py` — `X-API-Key` compared with `secrets.compare_digest`,
+  plus the second allowlist layer. An unset key fails closed, never open.
+- `app/api/schemas.py` — typed request/response contract; `extra: forbid` so
+  an unexpected field is a loud 422 rather than a silent drop.
+- `app/api/responder.py` — deterministic replies (`/start`, `/help`, `/ping`,
+  `/whoami`, echo). This is the seam Phase 5 replaces with Claude.
+- `tests/test_api.py` — 20 tests, mostly about refusal: missing key, wrong
+  key, key prefix, unconfigured key, stranger with a valid key, unknown
+  fields, HTML injection.
+- `fastapi` and `uvicorn[standard]` in `requirements.txt`.
+
+### Changed
+- `api_host` now defaults to `127.0.0.1` instead of `0.0.0.0`. The tunnel runs
+  on this machine and can reach loopback; `0.0.0.0` would also have published
+  the API to every device on whatever network the laptop joined.
+
+### Notes
+- The message text is deliberately **not** logged — only its length. Logs get
+  shipped and shared; the conversation is the private part.
+- Interactive docs (`/docs`, `/openapi.json`) are served in development only.
+  On a public tunnel they would hand a stranger a map of the service.
+
+---
+
 ## [Phase 3] — 2026-09-19 — Telegram bot connected (in progress)
 
 ### Added

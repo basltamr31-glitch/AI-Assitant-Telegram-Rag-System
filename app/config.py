@@ -48,7 +48,10 @@ class Settings(BaseSettings):
     # --- Application ---------------------------------------------------------
     app_env: Literal["development", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    api_host: str = "0.0.0.0"
+    # Loopback on purpose: the tunnel runs on this machine and can reach
+    # 127.0.0.1, whereas 0.0.0.0 would also expose the API to every device
+    # on whatever network you are joined to. Phase 15 sets this per deploy.
+    api_host: str = "127.0.0.1"
     api_port: int = 8000
 
     # --- Internal auth (n8n -> Python), used from Phase 4 --------------------
