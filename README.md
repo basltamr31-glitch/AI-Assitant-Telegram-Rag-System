@@ -90,4 +90,5 @@ Services once running:
 
 ## Project status
 
-Phase 4 of 15. See `ROADMAP.md`.
+Phase 4 of 15 complete — Milestone 1 (the round trip) reached.
+See `ROADMAP.md`.

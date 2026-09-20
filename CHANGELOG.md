@@ -6,7 +6,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 4] — 2026-09-19 — The internal API (in progress)
+## [Phase 4] — 2026-09-20 — 🏁 Milestone 1: the round trip
+
+### Verified
+- Five consecutive webhook executions succeeded end to end, each completing
+  in roughly 250–350 ms: phone → Telegram → n8n (EU) → public internet →
+  ngrok → laptop → Python → back. Before publishing, the exact request n8n
+  would send was replayed by hand through the public URL, so the only
+  untested link at go-live was n8n itself.
 
 ### Added
 - `app/api/main.py` — FastAPI app factory, `GET /healthz` (unauthenticated,
