@@ -6,6 +6,47 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 5] — 2026-09-20 — Claude behind the seam (in progress)
+
+### Added
+- `app/llm/client.py` — the Anthropic adapter ADR-004 called for. Returns an
+  `LLMResult` carrying text *and* token counts, with `cost_usd` computed from
+  a `PRICING` table kept as data. Cost is measured from the first call, not
+  added in Phase 14: a number you only start collecting once it hurts has no
+  history to compare against.
+- `app/llm/prompts.py` — the system prompt in its own module, so it can be
+  diffed in review and pinned in an eval instead of hiding inside a call.
+- `app/api/telegram_html.py` — a sanitiser for model output. Telegram accepts
+  a short allowlist of tags and rejects the **whole message** on anything
+  else, so unsanitised output means silence, not a formatting glitch. It keeps
+  allowed tags, escapes the rest, drops dangerous attributes, and closes what
+  the model left open.
+- `tests/test_telegram_html.py` (11) and `tests/test_llm_client.py` (5).
+- `anthropic>=0.40` in `requirements.txt`.
+
+### Changed
+- `app/api/responder.py` — the seam, rewritten. Commands (`/start`, `/help`,
+  `/ping`, `/whoami`) are still answered locally and spend no tokens;
+  everything else goes to Claude. A test asserts the model is never called for
+  a command.
+- `app/api/main.py` — builds the client once at startup and puts it on
+  `app.state`, which also lets tests substitute a fake. `/healthz` now reports
+  `llm: ready | unavailable`.
+- `API_VERSION` is `0.5.0`.
+
+### Notes
+- A missing `ANTHROPIC_API_KEY` **degrades** rather than failing closed:
+  commands keep working and chat explains what is wrong. That is the opposite
+  of the `INTERNAL_API_KEY` rule, and deliberately so — one is a security
+  control, the other is a capability.
+- Truncation happens *before* sanitising. Cutting sanitised HTML could slice
+  a tag in half; sanitising afterwards closes whatever the cut left open.
+- Still no memory and no documents. The system prompt says so, so the
+  assistant admits it instead of inventing a past.
+- The prompt and the reply are not logged — only token counts and cost.
+
+---
+
 ## [Phase 4] — 2026-09-20 — 🏁 Milestone 1: the round trip
 
 ### Verified

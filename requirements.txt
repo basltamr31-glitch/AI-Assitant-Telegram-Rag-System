@@ -18,8 +18,10 @@ httpx>=0.27              # modern HTTP client, sync + async
 fastapi>=0.111           # typed HTTP framework; validation comes from pydantic
 uvicorn[standard]>=0.30  # ASGI server that actually runs it
 
+# --- Phase 5: the model ------------------------------------------------------
+anthropic>=0.40          # official SDK; ADR-004 keeps it behind an adapter
+
 # Added later:
-#   Phase 5  anthropic
 #   Phase 6  pypdf, python-docx, openpyxl, python-pptx, beautifulsoup4,
 #            sentence-transformers
 #   Phase 11 mcp

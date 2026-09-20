@@ -51,3 +51,6 @@ class HealthResponse(BaseModel):
     status: str
     env: str
     version: str
+    # "ready" or "unavailable". Says whether the service can reach Claude
+    # without revealing anything about the key itself.
+    llm: str = "unknown"

@@ -12,7 +12,7 @@ is explicitly approved.
 | **2** | n8n fundamentals: trigger, nodes, expressions, credentials, webhook | A manual webhook call returns your own JSON | ✅ |
 | **3** | Telegram bot via BotFather; n8n echoes messages | You message the bot, it echoes back — no Python yet | ✅ |
 | **4** | FastAPI service; n8n calls it; `X-API-Key` auth | 🏁 **MILESTONE 1** — full round trip Telegram→n8n→Python→Telegram | ✅ |
-| **5** | Claude integration, system prompt, token + cost logging | The bot converses. No memory, no knowledge | ⬜ |
+| **5** | Claude integration, system prompt, token + cost logging | The bot converses. No memory, no knowledge | 🔵 |
 | **6** | Ingestion: loaders → parse → clean → chunk → metadata → embed → store | You inspect your own chunks in the Qdrant dashboard | ⬜ |
 | **7** | Retrieval + CLI test harness | Ask questions from the terminal, see chunks and scores | ⬜ |
 | **8** | RAG wired into the chat endpoint | 🏁 **MILESTONE 2** — grounded answers with citations in Telegram | ⬜ |

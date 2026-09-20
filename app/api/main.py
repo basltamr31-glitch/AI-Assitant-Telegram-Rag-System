@@ -35,8 +35,9 @@ from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
 from app.api.security import require_allowed_user, require_api_key
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.llm.client import AnthropicClient
 
-API_VERSION = "0.4.0"
+API_VERSION = "0.5.0"
 
 log = get_logger(__name__)
 
@@ -54,6 +55,17 @@ def create_app() -> FastAPI:
         json_output=settings.app_env == "production",
     )
 
+    # Built once, at startup: the SDK holds a connection pool, and rebuilding
+    # it per request would add a TLS handshake to every message.
+    try:
+        llm: AnthropicClient | None = AnthropicClient()
+        log.info("llm.ready", model=settings.anthropic_model)
+    except Exception as exc:  # noqa: BLE001
+        # A missing key is not a security failure, so this degrades instead of
+        # refusing to start: commands keep working and say what is wrong.
+        llm = None
+        log.error("llm.unavailable", reason=str(exc))
+
     app = FastAPI(
         title="Telegram AI Assistant - internal API",
         version=API_VERSION,
@@ -64,6 +76,8 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url="/openapi.json" if settings.app_env == "development" else None,
     )
+
+    app.state.llm = llm
 
     @app.middleware("http")
     async def trace_and_log(request: Request, call_next):
@@ -105,7 +119,12 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", response_model=HealthResponse, tags=["ops"])
     async def healthz() -> HealthResponse:
-        return HealthResponse(status="ok", env=settings.app_env, version=API_VERSION)
+        return HealthResponse(
+            status="ok",
+            env=settings.app_env,
+            version=API_VERSION,
+            llm="ready" if app.state.llm is not None else "unavailable",
+        )
 
     @app.post(
         "/v1/chat",
@@ -113,14 +132,14 @@ def create_app() -> FastAPI:
         tags=["chat"],
         dependencies=[Depends(require_api_key)],
     )
-    async def chat(payload: ChatRequest) -> ChatResponse:
+    async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         """Produce a reply for one Telegram message."""
         # Layer two of the allowlist. n8n filtered already; we do not take its
         # word for it, because this endpoint is reachable without n8n.
         require_allowed_user(payload.user_id)
 
         trace_id = structlog.contextvars.get_contextvars().get("trace_id", "")
-        reply, handled_by = respond(payload)
+        reply, handled_by = await respond(payload, request.app.state.llm)
 
         log.info(
             "chat.replied",
