@@ -6,6 +6,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [ADR-014] — 2026-09-28 — A free model, and the adapter earns its keep
+
+The Anthropic account ran out of credit (`400 - Your credit balance is too
+low`), so the model provider became switchable.
+
+### Added
+- `app/llm/base.py` — `LLMResult` and `PRICING`, shared by every provider.
+  `local=True` means a true zero cost rather than an unpriced unknown.
+- `app/llm/ollama_client.py` — talks to a local Ollama server over httpx; no
+  new dependency. Sends `think: false` **and** strips `<think>` blocks, since
+  a reasoning model that ignored the flag would narrate its scratchpad into
+  the chat.
+- `create_llm_client()` in `app/llm/client.py`, selected by `LLM_PROVIDER`.
+  Providers are imported lazily, so a missing Anthropic key is not a startup
+  failure when Ollama is the one in use.
+- Four tests: local cost is zero, no spurious pricing warning, think-blocks
+  stripped, and the factory returns the configured provider.
+
+### Changed
+- `app/api/responder.py` depends on an `LLMProtocol` with a single method
+  instead of naming `AnthropicClient`. It now cannot reference a vendor even
+  by accident, and the test fake satisfies it without inheriting anything.
+
+### Fixed
+- The test fixture now pins `ANTHROPIC_API_KEY=""`. Two tests had started
+  passing for the wrong reason once a real key appeared in the developer's
+  `.env` — "does a missing key degrade gracefully?" had quietly stopped being
+  tested. A unit test that reads `.env` is not a unit test.
+
+---
+
 ## [ADR-013] — 2026-09-28 — n8n comes home
 
 The n8n Cloud trial ended. ADR-011 had traded a weaker security position for

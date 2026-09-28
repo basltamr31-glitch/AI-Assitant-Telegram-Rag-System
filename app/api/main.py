@@ -35,7 +35,7 @@ from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
 from app.api.security import require_allowed_user, require_api_key
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
-from app.llm.client import AnthropicClient
+from app.llm.client import create_llm_client
 
 API_VERSION = "0.5.0"
 
@@ -58,8 +58,16 @@ def create_app() -> FastAPI:
     # Built once, at startup: the SDK holds a connection pool, and rebuilding
     # it per request would add a TLS handshake to every message.
     try:
-        llm: AnthropicClient | None = AnthropicClient()
-        log.info("llm.ready", model=settings.anthropic_model)
+        llm = create_llm_client()
+        log.info(
+            "llm.ready",
+            provider=settings.llm_provider,
+            model=(
+                settings.ollama_model
+                if settings.llm_provider == "ollama"
+                else settings.anthropic_model
+            ),
+        )
     except Exception as exc:  # noqa: BLE001
         # A missing key is not a security failure, so this degrades instead of
         # refusing to start: commands keep working and say what is wrong.

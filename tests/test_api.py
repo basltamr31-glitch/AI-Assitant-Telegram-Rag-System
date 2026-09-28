@@ -58,6 +58,13 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("INTERNAL_API_KEY", GOOD_KEY)
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", str(OWNER_ID))
     monkeypatch.setenv("APP_ENV", "development")
+    # Pin the model provider off. Without this the suite reads whatever key
+    # happens to be in the developer's .env, and "does a missing key degrade
+    # gracefully?" quietly stops being tested the day someone adds one.
+    # Environment variables outrank the .env file in pydantic-settings, so an
+    # empty string here wins.
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     # Settings are cached with lru_cache, so the patched environment only
     # takes effect once the cache is dropped - before *and* after, so this
     # test's values never leak into the next one.
@@ -114,6 +121,7 @@ def test_unconfigured_key_closes_the_door(monkeypatch: pytest.MonkeyPatch) -> No
     """An empty INTERNAL_API_KEY must never mean "let everyone in"."""
     monkeypatch.setenv("INTERNAL_API_KEY", "")
     monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", str(OWNER_ID))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     get_settings.cache_clear()
 
     from app.api.main import create_app

@@ -27,7 +27,9 @@ import html
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import sanitise, truncate
 from app.core.logging import get_logger
-from app.llm.client import AnthropicClient
+from typing import Protocol
+
+from app.llm.base import LLMResult
 from app.llm.prompts import SYSTEM_PROMPT
 
 log = get_logger(__name__)
@@ -89,9 +91,22 @@ def _local_reply(request: ChatRequest, text: str) -> tuple[str, str] | None:
     return None
 
 
+class LLMProtocol(Protocol):
+    """What the responder needs from a model - and nothing more.
+
+    A Protocol rather than a base class: neither provider has to import this
+    or inherit from it, and the fake in the tests satisfies it for free. The
+    responder cannot name a vendor even by accident.
+    """
+
+    async def complete(
+        self, system: str, user_message: str, max_tokens: int = ...
+    ) -> LLMResult: ...
+
+
 async def respond(
     request: ChatRequest,
-    llm: AnthropicClient | None,
+    llm: LLMProtocol | None,
 ) -> tuple[str, str]:
     """Return `(reply_html, handled_by)` for one message.
 

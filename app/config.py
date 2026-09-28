@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # --- Internal auth (n8n -> Python), used from Phase 4 --------------------
     internal_api_key: SecretStr = SecretStr("")
 
+    # --- Which model answers (ADR-014) ---------------------------------------
+    # The one line that decides whether a reply costs money or CPU time.
+    llm_provider: Literal["anthropic", "ollama"] = "anthropic"
+
+    # --- Ollama: a model running on this machine ------------------------------
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen3:1.7b"
+
     # --- Anthropic, used from Phase 5 ----------------------------------------
     anthropic_api_key: SecretStr = SecretStr("")
     anthropic_model: str = "claude-opus-5"
@@ -130,7 +138,9 @@ class Settings(BaseSettings):
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
             "postgres": f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}",
+            "llm_provider": self.llm_provider,
             "anthropic_model": self.anthropic_model,
+            "ollama_model": self.ollama_model,
             "internal_api_key": secret(self.internal_api_key),
             "anthropic_api_key": secret(self.anthropic_api_key),
             "telegram_bot_token": secret(self.telegram_bot_token),

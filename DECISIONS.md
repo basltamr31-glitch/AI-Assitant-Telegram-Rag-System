@@ -181,6 +181,55 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-014 — The model provider is a config line; Ollama is the free path
+
+**Date:** 2026-09-28 · **Status:** Accepted
+
+**Decision.** `LLM_PROVIDER` in `.env` selects between `anthropic` (Claude,
+paid) and `ollama` (a model running on this laptop, free). Development
+defaults to `ollama` with `qwen3:1.7b`. `responder.py` depends on a Protocol
+with one method and cannot name either provider.
+
+**Reason.** The Anthropic account ran out of credit mid-phase: the API
+answered `400 - Your credit balance is too low`. Work had to continue, and
+ADR-004 had already promised that swapping the model would be "one config
+line". This is the first time that promise was called in, and it held - the
+change was a new adapter plus a factory, with nothing touched in n8n, the API
+layer, or the responder's logic.
+
+**Measured, on this machine.** `qwen3:1.7b` on an i7-1255U with no discrete
+GPU: about 10 tokens/second once the model is warm, 1-5 seconds for a short
+reply, and correct Arabic and arithmetic on simple questions. Usable.
+
+**What it costs in quality.** A 1.7B model is not Opus 5, and the gap is
+widest at the thing this project cares most about: ADR-004 chose Opus for
+"reliably refusing to answer without evidence", which is exactly where small
+models invent instead. Phase 8 depends on that behaviour and Phase 14 will
+measure it rather than leave it a feeling. Expect the eval scores to make the
+case for paying, at which point `LLM_PROVIDER=anthropic` switches back.
+
+Occasional artefacts are visible already: one Arabic reply contained a
+Vietnamese word mid-sentence.
+
+**Alternatives considered.**
+- *Buy Anthropic credits* - still the best quality, and the switch back is one
+  line. Not chosen now because free had to work first.
+- *A free hosted tier (Gemini, Groq)* - better quality than a 1.7B local
+  model and still free, but it sends conversations to a third party and adds
+  another account and key. Worth revisiting; the adapter makes it cheap to try.
+- *A larger local model* - `qwen2.5:7b` would be noticeably better and would
+  run at roughly 4-7 tokens/second here, i.e. 30-60 seconds per reply. Too
+  slow for a chat bot on this hardware.
+
+**Consequence.** Cost accounting has to distinguish "free" from "unpriced":
+`LLMResult.local` returns a true zero instead of falling through to the
+unknown-model warning, so Phase 14 compares real numbers.
+
+**Unchanged.** ADR-003 already keeps embeddings local, so documents never
+leave the machine regardless of which chat model answers.
+
+---
+
 ## ADR-013 — Back to self-hosted n8n; the tunnel moves in front of it
 
 **Date:** 2026-09-28 · **Status:** Accepted (supersedes ADR-011; reinstates ADR-010)

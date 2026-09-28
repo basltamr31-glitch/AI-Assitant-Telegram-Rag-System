@@ -16,51 +16,13 @@ only start collecting once it hurts has no history to compare against, and
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
 from app.core.logging import get_logger
+from app.llm.base import PRICING, LLMResult
 
 log = get_logger(__name__)
-
-# USD per million tokens, (input, output). Kept as data rather than buried in
-# a formula so that a price change is a one-line edit with an obvious diff.
-# Source: ADR-004.
-PRICING: dict[str, tuple[float, float]] = {
-    "claude-opus-5": (5.00, 25.00),
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-haiku-4-5-20251001": (1.00, 5.00),
-}
-
-
-@dataclass(frozen=True)
-class LLMResult:
-    """One completion, plus what it cost to produce."""
-
-    text: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    stop_reason: str | None
-
-    @property
-    def cost_usd(self) -> float:
-        """Estimated cost. Unknown models price at zero rather than crash."""
-        rates = PRICING.get(self.model)
-        if rates is None:
-            # Worth noticing: it means PRICING drifted from the configured
-            # model, and every cost number since is silently wrong.
-            log.warning("llm.unknown_pricing", model=self.model)
-            return 0.0
-        input_rate, output_rate = rates
-        return round(
-            (self.input_tokens * input_rate + self.output_tokens * output_rate)
-            / 1_000_000,
-            6,
-        )
-
 
 class AnthropicClient:
     """Thin async wrapper around the Anthropic Messages API."""
@@ -116,3 +78,18 @@ class AnthropicClient:
             # message text is not: logs travel, conversations should not.
         )
         return result
+
+
+def create_llm_client() -> AnthropicClient | "OllamaClient":
+    """Build whichever provider `.env` selected.
+
+    Imported lazily so that choosing Ollama does not require the Anthropic SDK
+    to be configured, and vice versa. A missing key or a stopped Ollama server
+    should be *that* provider's problem, not a startup failure for both.
+    """
+    provider = get_settings().llm_provider
+    if provider == "ollama":
+        from app.llm.ollama_client import OllamaClient
+
+        return OllamaClient()
+    return AnthropicClient()

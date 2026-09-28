@@ -7,7 +7,9 @@ job, with an eval set.
 
 from __future__ import annotations
 
-from app.llm.client import PRICING, LLMResult
+import pytest
+
+from app.llm.base import PRICING, LLMResult
 
 
 def _result(model: str, tokens_in: int, tokens_out: int) -> LLMResult:
@@ -45,3 +47,52 @@ def test_configured_model_is_priced() -> None:
     from app.config import Settings
 
     assert Settings().anthropic_model in PRICING
+
+
+# --- the local provider ------------------------------------------------------
+
+
+def test_a_local_model_costs_nothing() -> None:
+    """Electricity is real, but it is not per-token. A fake number in the
+    logs would poison the comparison Phase 14 exists to make."""
+    r = LLMResult(
+        text="x",
+        model="qwen3:1.7b",
+        input_tokens=5_000,
+        output_tokens=5_000,
+        stop_reason="stop",
+        local=True,
+    )
+    assert r.cost_usd == 0.0
+
+
+def test_a_local_model_does_not_warn_about_missing_pricing() -> None:
+    """`local=True` must short-circuit before the PRICING lookup, or every
+    local reply would log a spurious 'unknown pricing' warning."""
+    assert "qwen3:1.7b" not in PRICING
+    assert _result("qwen3:1.7b", 10, 10).cost_usd == 0.0  # unknown, not local
+    assert LLMResult("x", "qwen3:1.7b", 10, 10, "stop", local=True).cost_usd == 0.0
+
+
+def test_thinking_blocks_are_stripped() -> None:
+    """Reasoning models narrate their scratchpad. The user must never see it."""
+    from app.llm.ollama_client import _THINK_BLOCK
+
+    raw = "<think>Let me work this out...\nstep 2</think>The capital is Paris."
+    assert _THINK_BLOCK.sub("", raw).strip() == "The capital is Paris."
+
+
+def test_the_factory_returns_the_configured_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ADR-004 promise, asserted: switching providers is one config line."""
+    from app.config import get_settings
+    from app.llm.client import create_llm_client
+    from app.llm.ollama_client import OllamaClient
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    get_settings.cache_clear()
+    try:
+        assert isinstance(create_llm_client(), OllamaClient)
+    finally:
+        get_settings.cache_clear()
