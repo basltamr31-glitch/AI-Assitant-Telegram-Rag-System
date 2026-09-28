@@ -94,5 +94,5 @@ Services once running:
 
 ## Project status
 
-Phase 5 of 15 in progress — Milestone 1 (the round trip) reached.
+Phase 5 of 15 complete — the bot converses. Milestone 1 reached.
 See `ROADMAP.md`.

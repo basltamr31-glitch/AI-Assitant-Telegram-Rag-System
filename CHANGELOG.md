@@ -86,7 +86,12 @@ left with the subscription. The trade reverses.
 
 ---
 
-## [Phase 5] — 2026-09-20 — Claude behind the seam (in progress)
+## [Phase 5] — 2026-09-28 — A model behind the seam
+
+### Verified
+- The bot holds a conversation end to end, answering from `qwen3:1.7b`
+  running locally at zero cost. `/ping` and the other commands still bypass
+  the model entirely.
 
 ### Added
 - `app/llm/client.py` — the Anthropic adapter ADR-004 called for. Returns an
