@@ -6,6 +6,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Fix] — 2026-09-28 — The API was being started on the wrong interface
+
+`scripts/run_api.py` added, and the README now points at it. The documented
+command was `uvicorn app.api.main:app --reload`, but the uvicorn CLI does not
+read `.env`: it binds `127.0.0.1` unless `--host` is passed. Since ADR-013
+that is precisely the address the n8n container cannot reach, because
+`host.docker.internal` resolves to the host's bridge address rather than to
+loopback. The script reads the typed settings instead, and warns if the
+resulting bind would be unreachable from Docker.
+
+---
+
 ## [ADR-014] — 2026-09-28 — A free model, and the adapter earns its keep
 
 The Anthropic account ran out of credit (`400 - Your credit balance is too
