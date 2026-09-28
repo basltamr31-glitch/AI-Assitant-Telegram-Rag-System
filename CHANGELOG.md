@@ -6,6 +6,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [ADR-013] — 2026-09-28 — n8n comes home
+
+The n8n Cloud trial ended. ADR-011 had traded a weaker security position for
+the n8n MCP connector; that connector only reached the Cloud instance, so it
+left with the subscription. The trade reverses.
+
+### Changed
+- `docker-compose.yml` — the n8n service gains `WEBHOOK_URL`, `N8N_PROTOCOL`
+  and `N8N_DEFAULT_BINARY_DATA_MODE=filesystem`. The `extra_hosts` entry for
+  `host.docker.internal` was already there from Phase 1, written for exactly
+  this case.
+- `.env` — `N8N_BASE_URL` back to `http://localhost:5678`, new `WEBHOOK_URL`,
+  and `API_HOST=0.0.0.0` so the container can reach the host.
+- `n8n/telegram-assistant.json` — the live workflow, imported into the local
+  n8n. Its API URL is now `http://host.docker.internal:8000/v1/chat`, and the
+  `ngrok-skip-browser-warning` header is gone: that request no longer crosses
+  the tunnel. The `phase-*.json` files stay as historical snapshots.
+
+### Security
+- **The Python API is off the public internet.** The tunnel terminates at n8n
+  now, so the API is reachable only from this machine's LAN rather than by
+  anyone who knew the ngrok hostname. This is the position ADR-010 argued for
+  before ADR-011 overrode it.
+
+### Fixed
+- `check_env.py` passes **4/4** for the first time. Phase 1's exit criterion
+  was never actually met while n8n lived in the cloud; it is now.
+
+### Notes
+- Credentials do not migrate between n8n instances — they are encrypted with
+  each instance's own key — so the Telegram token and the API key are entered
+  once more in the local editor.
+- Workflows can no longer be built through MCP. They are imported from
+  `n8n/*.json` and edited by hand.
+
+---
+
 ## [Phase 5] — 2026-09-20 — Claude behind the seam (in progress)
 
 ### Added

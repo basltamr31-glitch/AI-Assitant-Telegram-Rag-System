@@ -48,9 +48,10 @@ class Settings(BaseSettings):
     # --- Application ---------------------------------------------------------
     app_env: Literal["development", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    # Loopback on purpose: the tunnel runs on this machine and can reach
-    # 127.0.0.1, whereas 0.0.0.0 would also expose the API to every device
-    # on whatever network you are joined to. Phase 15 sets this per deploy.
+    # Safe default. ADR-013 makes development override this to 0.0.0.0 in
+    # .env, because the n8n container reaches the host through
+    # host.docker.internal, which is not loopback. The API is then on the
+    # LAN but no longer on the internet: the tunnel fronts n8n instead.
     api_host: str = "127.0.0.1"
     api_port: int = 8000
 

@@ -72,6 +72,15 @@ services:
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      # ADR-013: n8n sits behind an ngrok tunnel, and it cannot discover that
+      # by itself. Without WEBHOOK_URL it would hand Telegram a localhost
+      # address to call back on, which Telegram cannot reach - the webhook
+      # would register and then never fire.
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      N8N_PROTOCOL: https
+      # Phase 6 ingests PDFs and spreadsheets. The default keeps binary data
+      # in memory, which is fine for a chat message and not for a 40 MB file.
+      N8N_DEFAULT_BINARY_DATA_MODE: filesystem
     volumes:
       - n8n_data:/home/node/.n8n
     extra_hosts:

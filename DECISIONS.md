@@ -181,9 +181,58 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-013 — Back to self-hosted n8n; the tunnel moves in front of it
+
+**Date:** 2026-09-28 · **Status:** Accepted (supersedes ADR-011; reinstates ADR-010)
+
+**Decision.** n8n runs in the `docker-compose.yml` container again, on
+`localhost:5678`. The single ngrok tunnel now points at **n8n** instead of the
+Python API, and n8n reaches the API over the Docker bridge at
+`http://host.docker.internal:8000`.
+
+**Reason.** The n8n Cloud trial ended. ADR-011 traded a weaker security
+position for the n8n MCP connector, which made workflows programmatically
+buildable — and that connector only ever reached the Cloud instance, so it
+left with the subscription. The thing the trade bought is gone; the trade
+reverses. ADR-010's original reasoning stands unchanged.
+
+**What this improves.** The Python API is no longer on the public internet. It
+was reachable by anyone who knew the ngrok hostname, guarded only by
+`X-API-Key`. Now the tunnel terminates at n8n, and the API is reachable only
+from this machine's LAN — one fewer layer of the system exposed, which is
+exactly the argument ADR-010 made before ADR-011 overrode it.
+
+**What it costs.**
+- Workflows can no longer be built or edited through MCP. They are imported
+  from `n8n/*.json` and edited by hand in the browser.
+- Credentials do not migrate: they are encrypted per instance, so the Telegram
+  token and the API key are re-entered once in the local n8n.
+- `API_HOST` must be `0.0.0.0`, because `host.docker.internal` resolves to the
+  host's bridge address, not to loopback. The API is therefore on the LAN. The
+  `X-API-Key` check is what makes that acceptable, and Phase 15 removes the
+  question entirely by putting both services on one private network.
+
+**Migration cost, as predicted.** ADR-011 promised that leaving Cloud would be
+"an import, not a rebuild", because every workflow is exported to `n8n/` in
+Git. That held: `n8n/telegram-assistant.json` imports directly, with only the
+API URL changed and the ngrok interstitial header removed.
+
+**Consequence.** `WEBHOOK_URL` must be set to the public tunnel address.
+Without it, n8n registers a `localhost` callback with Telegram, the webhook
+saves successfully, and then never fires — a failure that looks like nothing
+at all.
+
+**Tradeoffs.** n8n's data now lives in a Docker volume on this laptop; if the
+volume is deleted, the workflows come back from Git but the credentials do
+not. Backups become a real concern, which is Phase 15's job.
+
+---
+
 ## ADR-012 — ngrok with a reserved domain is the development tunnel
 
-**Date:** 2026-09-19 · **Status:** Accepted, revisit in Phase 15
+**Date:** 2026-09-19 · **Status:** Accepted; ADR-013 moved the tunnel in
+front of n8n rather than the API. The reserved-domain reasoning below is
+unchanged and is why the same domain kept working across that move.
 
 **Decision.** n8n Cloud reaches the local FastAPI service through an ngrok
 tunnel bound to a reserved (static) domain on the free tier. The API binds to

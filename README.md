@@ -42,8 +42,8 @@ pip install -r requirements-dev.txt
 # 3. Configure
 copy .env.example .env               # then fill in the blanks
 
-# 4. Start infrastructure (Postgres + Qdrant; n8n runs on Cloud, see ADR-011)
-docker compose up -d postgres qdrant
+# 4. Start infrastructure (Postgres, Qdrant and n8n - ADR-013)
+docker compose up -d
 
 # 5. Verify everything works
 python scripts/check_env.py
@@ -58,22 +58,25 @@ three are.
 # a. The internal API
 uvicorn app.api.main:app --reload
 
-# b. The tunnel that lets n8n Cloud reach it (ADR-012)
+# b. The tunnel that gives n8n a public HTTPS address for Telegram (ADR-013)
 #    One-off setup:  scoop install ngrok
 #                    ngrok config add-authtoken <token from the ngrok dashboard>
-#    ngrok 3.39 takes --url, not the older --domain.
-ngrok http 8000 --url=https://<your-reserved-domain>.ngrok-free.app
+#    ngrok 3.39 takes --url, not the older --domain. Port 5678 is n8n, NOT
+#    the API: since ADR-013 the tunnel fronts n8n, and the API stays off the
+#    public internet.
+ngrok http 5678 --url=$WEBHOOK_URL
 
-# c. Nothing to run for n8n - it is Cloud-hosted. Just make sure the
-#    workflow is Active.
+# c. n8n itself runs in Docker from step 4. Just make sure the workflow is
+#    activated in the editor at http://localhost:5678.
 ```
 
 Services once running:
 
 | Service | URL |
 |---|---|
-| n8n | `N8N_BASE_URL` in `.env` (Cloud during development) |
-| Internal API | http://127.0.0.1:8000 - `/healthz` needs no key |
+| n8n editor | http://localhost:5678 |
+| n8n, publicly | `WEBHOOK_URL` in `.env` - the ngrok address Telegram calls |
+| Internal API | http://localhost:8000 - `/healthz` needs no key |
 | API docs | http://127.0.0.1:8000/docs (development only) |
 | Qdrant dashboard | http://localhost:6333/dashboard |
 | Postgres | localhost:5432 |
@@ -90,5 +93,5 @@ Services once running:
 
 ## Project status
 
-Phase 4 of 15 complete — Milestone 1 (the round trip) reached.
+Phase 5 of 15 in progress — Milestone 1 (the round trip) reached.
 See `ROADMAP.md`.
