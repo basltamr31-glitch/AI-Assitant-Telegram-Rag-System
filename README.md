@@ -55,9 +55,12 @@ Three processes, each in its own terminal. The bot is only alive while all
 three are.
 
 ```bash
-# a. The internal API. Use the script, not `uvicorn` directly: the CLI does
-#    not read .env and binds 127.0.0.1, which the n8n container cannot reach.
-python scripts/run_api.py
+# a. The internal API. Two things this line is doing on purpose:
+#    - .venv\Scripts\python.exe, not bare `python`: it needs no activation,
+#      so the command cannot pick up the system interpreter by mistake.
+#    - run_api.py, not `uvicorn` directly: the CLI does not read .env and
+#      binds 127.0.0.1, which the n8n container cannot reach.
+.venv\Scripts\python.exe scripts/run_api.py
 
 # b. The tunnel that gives n8n a public HTTPS address for Telegram (ADR-013)
 #    One-off setup:  scoop install ngrok
