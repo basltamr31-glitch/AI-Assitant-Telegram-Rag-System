@@ -80,7 +80,7 @@ class AnthropicClient:
         return result
 
 
-def create_llm_client() -> AnthropicClient | "OllamaClient":
+def create_llm_client():
     """Build whichever provider `.env` selected.
 
     Imported lazily so that choosing Ollama does not require the Anthropic SDK
@@ -92,4 +92,8 @@ def create_llm_client() -> AnthropicClient | "OllamaClient":
         from app.llm.ollama_client import OllamaClient
 
         return OllamaClient()
+    if provider == "openrouter":
+        from app.llm.openrouter_client import OpenRouterClient
+
+        return OpenRouterClient()
     return AnthropicClient()

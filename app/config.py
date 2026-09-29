@@ -60,7 +60,14 @@ class Settings(BaseSettings):
 
     # --- Which model answers (ADR-014) ---------------------------------------
     # The one line that decides whether a reply costs money or CPU time.
-    llm_provider: Literal["anthropic", "ollama"] = "anthropic"
+    llm_provider: Literal["anthropic", "ollama", "openrouter"] = "ollama"
+
+    # --- OpenRouter: one key, hundreds of models (ADR-015) --------------------
+    openrouter_api_key: SecretStr = SecretStr("")
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Free, 27B, 262k context - and far stronger in Arabic than anything that
+    # fits on this laptop. `scripts/list_models.py` shows the current options.
+    openrouter_model: str = "qwen/qwen3.8-27b:free"
 
     # --- Ollama: a model running on this machine ------------------------------
     ollama_base_url: str = "http://localhost:11434"
@@ -141,6 +148,8 @@ class Settings(BaseSettings):
             "llm_provider": self.llm_provider,
             "anthropic_model": self.anthropic_model,
             "ollama_model": self.ollama_model,
+            "openrouter_model": self.openrouter_model,
+            "openrouter_api_key": secret(self.openrouter_api_key),
             "internal_api_key": secret(self.internal_api_key),
             "anthropic_api_key": secret(self.anthropic_api_key),
             "telegram_bot_token": secret(self.telegram_bot_token),

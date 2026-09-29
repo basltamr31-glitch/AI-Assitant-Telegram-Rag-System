@@ -20,22 +20,13 @@ number on that gap rather than leaving it a feeling.
 
 from __future__ import annotations
 
-import re
-
 import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.llm.base import LLMResult
+from app.llm.base import LLMResult, strip_thinking
 
 log = get_logger(__name__)
-
-# Reasoning models emit their scratchpad in <think> blocks. `think: false`
-# below should suppress it, but a model that ignores the flag would otherwise
-# leak its working into the chat, so it is stripped as well. Two cheap
-# defences beat one clever one.
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
 
 class OllamaClient:
     """Talks to a local Ollama server over its HTTP API."""
@@ -75,7 +66,7 @@ class OllamaClient:
         response.raise_for_status()
         data = response.json()
 
-        text = _THINK_BLOCK.sub("", data.get("message", {}).get("content", "")).strip()
+        text = strip_thinking(data.get("message", {}).get("content", ""))
         result = LLMResult(
             text=text,
             model=data.get("model", self._model),

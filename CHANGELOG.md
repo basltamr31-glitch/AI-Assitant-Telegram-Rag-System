@@ -6,6 +6,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [ADR-015] — 2026-09-29 — OpenRouter, and cost the provider reports
+
+### Added
+- `app/llm/openrouter_client.py` — one OpenAI-compatible adapter reaching
+  hundreds of models. `OPENROUTER_MODEL` switches between them with no code
+  change, one step beyond what ADR-004 promised.
+- `scripts/list_models.py` — prints OpenRouter's live catalogue, cheapest
+  first. Model ids and prices change faster than documentation, so this asks
+  the source instead of trusting a list.
+- `LLMResult.reported_cost_usd` — the provider's own figure, which takes
+  precedence over the `PRICING` table.
+- Four tests: reported cost beats the table, a free model records a measured
+  zero, the factory returns the right provider, and selecting OpenRouter with
+  no key fails at startup rather than on the user's first message.
+
+### Changed
+- `strip_thinking()` moved to `app/llm/base.py`. Reasoning models are not an
+  Ollama quirk and OpenRouter serves plenty of them.
+- The default `LLM_PROVIDER` is now `ollama` rather than `anthropic`: the
+  default should be the one that works without a bill.
+
+### Notes
+- Scope answered: the knowledge base is **Arabic**, covering both the Syrian
+  curriculum and legal/real-estate material. Recorded in `ROADMAP.md`, along
+  with the two design concerns it raises — retrieval can actively harm maths
+  answers, and laws need article-level chunking that curriculum prose does not.
+
+---
+
 ## [Fix] — 2026-09-28 — The API was being started on the wrong interface
 
 `scripts/run_api.py` added, and the README now points at it. The documented

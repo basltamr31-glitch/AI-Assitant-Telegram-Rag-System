@@ -62,11 +62,11 @@ def create_app() -> FastAPI:
         log.info(
             "llm.ready",
             provider=settings.llm_provider,
-            model=(
-                settings.ollama_model
-                if settings.llm_provider == "ollama"
-                else settings.anthropic_model
-            ),
+            model={
+                "ollama": settings.ollama_model,
+                "openrouter": settings.openrouter_model,
+                "anthropic": settings.anthropic_model,
+            }[settings.llm_provider],
         )
     except Exception as exc:  # noqa: BLE001
         # A missing key is not a security failure, so this degrades instead of

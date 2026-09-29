@@ -181,6 +181,58 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-015 — OpenRouter as the third provider; one model until evals say otherwise
+
+**Date:** 2026-09-29 · **Status:** Accepted
+
+**Decision.** `LLM_PROVIDER=openrouter` reaches hundreds of models through one
+OpenAI-compatible endpoint and one key. `OPENROUTER_MODEL` selects which, with
+no code change. The default is `qwen/qwen3.8-27b:free` — free, 27B, 262k
+context. We run **one** model for now; per-task routing is deferred.
+
+**Reason.** The knowledge base is Arabic legal and curriculum text, and the
+local 1.7B model handles Arabic only roughly — one reply mixed a Vietnamese
+word into an Arabic sentence. That matters more than it looks: from Phase 6
+onwards every measurement is about retrieval quality, and a weak reader makes
+a bad chunk and a bad answer indistinguishable. The reader has to be good
+enough that retrieval is the thing being measured.
+
+**Why now rather than after Phase 6.** Phase 6 itself needs no chat model —
+ingestion uses the embedder only. But Phase 7 and 8 do, and the ingestion
+choices made in Phase 6 get judged by them. Better to have the reader settled
+before the thing it judges is built.
+
+**Why not per-task routing yet.** The request was to route by task, using
+different models for maths, legal and general questions. It is the right
+eventual shape and it is deferred anyway, because a router needs a classifier
+deciding which task a message is — a new component, a new failure mode, and no
+evidence yet about which model is actually better at what. Phase 14 produces
+that evidence. Routing built on measurement is a feature; routing built on
+intuition is a guess with extra moving parts.
+
+**Cost accounting.** OpenRouter prices change without notice, so `PRICING` is
+not extended to cover it. Each call asks for `usage.include` and records the
+cost the provider reports. `LLMResult.reported_cost_usd` takes precedence over
+the table: a price list nobody updates looks authoritative and is wrong, which
+is worse than having none.
+
+**Alternatives considered.**
+- *Stay on local Ollama* — free and private, but too weak in Arabic to trust
+  as the reader while retrieval quality is being tuned. It stays one config
+  line away and remains useful for offline work.
+- *Provider SDKs for Gemini, Groq and others directly* — one adapter each, one
+  key each. OpenRouter is a single adapter for all of them.
+- *Pay for Claude again* — still the quality benchmark, and ADR-004's reasons
+  stand. Revisit when Phase 14 can put a number on the gap.
+
+**Tradeoffs.** A third party now sits between us and the model, seeing every
+prompt. Conversations already leave the machine under any hosted provider, and
+ADR-003 keeps documents local regardless — but the free tier is rate-limited
+and a `:free` model id can be withdrawn, so `scripts/list_models.py` exists to
+find the current options rather than trusting a list in a document.
+
+---
+
 ## ADR-014 — The model provider is a config line; Ollama is the free path
 
 **Date:** 2026-09-28 · **Status:** Accepted
