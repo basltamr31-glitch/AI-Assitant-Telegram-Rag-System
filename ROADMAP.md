@@ -40,12 +40,29 @@ with backups and monitoring.
 
 ## Open questions
 
-Needed by Phase 6, not before:
+Answered 2026-09-29, except where noted.
 
-1. **Subject matter** of the knowledge base — drives chunk sizing, the system
-   prompt persona, and the refusal rules.
-2. **Language(s)** of the documents — English-only allows a stronger, smaller
-   English embedding model; anything else requires a multilingual model.
-3. **Volume and location** — roughly how many documents, and where they live
-   now (local folder, Google Drive, Notion, SharePoint, a website). If they
-   live in a cloud service, n8n gains a genuine second job: scheduled sync.
+1. **Subject matter** — ✅ Two domains, not one:
+   - *Education*: the Syrian curriculum, including solving maths problems and
+     explaining the reasoning.
+   - *Legal / real estate*: laws, regulations and contracts, applying the
+     relevant rules to a specific case.
+   The goal is stated as reasoning support, not passage retrieval: the system
+   should give the model the knowledge and context needed to work a problem.
+
+2. **Language(s)** — ✅ Arabic. This settles the embedder: ADR-003 assumed an
+   English-only model may be possible, and it is not. A multilingual model is
+   required, and changing it later costs a full re-ingestion.
+
+3. **Volume and location** — ⬜ **Still open.** Blocks Phase 6.
+
+### Consequences still to be decided
+
+- Whether both domains are ingested at once or one at a time. They need
+  different chunking: laws have articles, curriculum has lessons and worked
+  examples.
+- Whether the two domains share one Qdrant collection with a `domain`
+  metadata filter, or live in separate collections.
+- Whether retrieval for maths helps or harms: a similar-but-different worked
+  example is a specific way to make a weak model answer confidently and
+  wrongly.
