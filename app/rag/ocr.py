@@ -33,6 +33,7 @@ import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
+from app.rag.latex_unwrap import unwrap
 from app.rag.quality import check_page, strip_preamble
 
 log = get_logger(__name__)
@@ -197,7 +198,9 @@ class VisionOcr:
                     self._sleep(attempt)
                     continue
 
-                text = strip_preamble(choice["message"].get("content") or "")
+                # Order matters: drop the commentary, recover prose from
+                # LaTeX packaging, and only then judge what is left.
+                text = unwrap(strip_preamble(choice["message"].get("content") or ""))
                 problem = check_page(text, self._min_arabic)
                 if problem is not None:
                     # A transcription that is visibly wrong is worse than a
