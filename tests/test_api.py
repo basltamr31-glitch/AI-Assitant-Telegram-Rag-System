@@ -13,6 +13,7 @@ wrong". Every 401 and 403 below is a door someone will eventually push on.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,9 +37,11 @@ class FakeLLM:
         self.text = text
         self.fails = fails
         self.calls: list[str] = []
+        self.systems: list[str] = []
 
     async def complete(self, system: str, user_message: str, max_tokens: int = 1024):
         self.calls.append(user_message)
+        self.systems.append(system)
         if self.fails:
             raise RuntimeError("upstream is down")
         from app.llm.client import LLMResult
@@ -65,6 +68,11 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # empty string here wins.
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    # Grounding off by default here, so these tests keep exercising the model
+    # path directly. The grounded path has its own fixture below, with a fake
+    # retriever - mixing the two would mean every assertion about a reply
+    # depended on a search result as well.
+    monkeypatch.setenv("RETRIEVAL_ENABLED", "false")
     # Settings are cached with lru_cache, so the patched environment only
     # takes effect once the cache is dropped - before *and* after, so this
     # test's values never leak into the next one.
@@ -261,3 +269,158 @@ def test_rejection_never_reveals_the_expected_key(client: TestClient) -> None:
     assert GOOD_KEY not in response.text
     # And the message must not distinguish "wrong key" from "no key".
     assert response.json()["detail"] == post(client, key=None).json()["detail"]
+
+
+# --- Phase 8: the grounded path ----------------------------------------------
+
+
+class FakeRetrieved:
+    def __init__(self, passages: list[str]) -> None:
+        self._passages = passages
+        self.threshold = 0.45
+        self.best_rejected_score = 0.41 if not passages else None
+        # The responder logs results[0].score, so the stand-ins need one.
+        self.results = [SimpleNamespace(score=0.9 - i * 0.1)
+                        for i in range(len(passages))]
+
+    @property
+    def found(self) -> bool:
+        return bool(self._passages)
+
+    def as_context(self, max_chars: int = 6000) -> str:
+        return "\n\n".join(
+            f"[{i}] source.pdf, p.{i}\n{p}" for i, p in enumerate(self._passages, 1)
+        )
+
+    def citations(self) -> list[str]:
+        return [f"source.pdf, p.{i}" for i in range(1, len(self._passages) + 1)]
+
+
+class FakeRetriever:
+    def __init__(self, passages: list[str] | None = None, fails: bool = False) -> None:
+        self.passages = passages or []
+        self.fails = fails
+        self.queries: list[str] = []
+
+    def retrieve(self, query: str, **kwargs):
+        self.queries.append(query)
+        if self.fails:
+            raise RuntimeError("qdrant is down")
+        return FakeRetrieved(self.passages)
+
+
+@pytest.fixture
+def grounded_client(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("INTERNAL_API_KEY", GOOD_KEY)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", str(OWNER_ID))
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("RETRIEVAL_ENABLED", "true")
+    get_settings.cache_clear()
+
+    from app.api.main import create_app
+
+    with TestClient(create_app()) as c:
+        yield c
+
+    get_settings.cache_clear()
+
+
+def test_a_grounded_answer_cites_its_sources(grounded_client: TestClient) -> None:
+    grounded_client.app.state.llm = FakeLLM(text="باريس هي العاصمة [1].")
+    grounded_client.app.state.retriever = FakeRetriever(["نص عن فرنسا"])
+
+    body = post(grounded_client, text="ما هي عاصمة فرنسا؟").json()
+
+    assert body["handled_by"] == "model.grounded"
+    assert body["sources"] == ["source.pdf, p.1"]
+
+
+def test_the_passages_reach_the_model(grounded_client: TestClient) -> None:
+    """The retrieved text must actually be in the prompt, not merely logged."""
+    fake = FakeLLM()
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever(["المستقيم المقارب"])
+
+    post(grounded_client, text="سؤال")
+
+    assert "المستقيم المقارب" in fake.systems[0]
+
+
+def test_nothing_retrieved_means_no_answer(grounded_client: TestClient) -> None:
+    """The point of the whole phase: an empty search is a refusal, not a guess."""
+    fake = FakeLLM(text="I would happily invent something here.")
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever([])
+
+    body = post(grounded_client, text="سؤال عن شيء غير موجود").json()
+
+    assert body["handled_by"] == "retrieval.empty"
+    assert body["sources"] == []
+    assert fake.calls == [], "the model was asked despite having no passages"
+
+
+def test_a_broken_knowledge_base_does_not_fall_back_to_inventing(
+    grounded_client: TestClient,
+) -> None:
+    fake = FakeLLM()
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever(fails=True)
+
+    body = post(grounded_client, text="سؤال").json()
+
+    assert body["handled_by"] == "retrieval.error"
+    assert fake.calls == []
+
+
+def test_a_missing_retriever_while_grounded_refuses(
+    grounded_client: TestClient,
+) -> None:
+    fake = FakeLLM()
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = None
+
+    body = post(grounded_client, text="سؤال").json()
+
+    assert body["handled_by"] == "retrieval.unavailable"
+    assert fake.calls == []
+
+
+def test_commands_still_bypass_retrieval(grounded_client: TestClient) -> None:
+    retriever = FakeRetriever(["irrelevant"])
+    grounded_client.app.state.llm = FakeLLM()
+    grounded_client.app.state.retriever = retriever
+
+    assert post(grounded_client, text="/ping").json()["handled_by"] == "command.ping"
+    assert retriever.queries == []
+
+
+def test_healthz_distinguishes_disabled_from_unavailable(
+    client: TestClient, grounded_client: TestClient
+) -> None:
+    assert client.get("/healthz").json()["retrieval"] == "disabled"
+    grounded_client.app.state.retriever = None
+    assert grounded_client.get("/healthz").json()["retrieval"] == "unavailable"
+
+
+def test_the_reply_shows_what_the_citation_numbers_mean(
+    grounded_client: TestClient,
+) -> None:
+    """A bare [1] tells the reader nothing, so it cannot be checked."""
+    grounded_client.app.state.llm = FakeLLM(text="الجواب موجود في المادة [1].")
+    grounded_client.app.state.retriever = FakeRetriever(["نص أول", "نص ثان"])
+
+    reply = post(grounded_client, text="سؤال").json()["reply"]
+
+    assert "[1] source.pdf, p.1" in reply
+    # The model did not cite [2], so the reader is not sent to look it up.
+    assert "[2] source.pdf, p.2" not in reply
+
+
+def test_an_answer_citing_nothing_appends_nothing(grounded_client: TestClient) -> None:
+    grounded_client.app.state.llm = FakeLLM(text="لا أجد ما يدعم هذا.")
+    grounded_client.app.state.retriever = FakeRetriever(["نص"])
+
+    reply = post(grounded_client, text="سؤال").json()["reply"]
+
+    assert "المصادر" not in reply

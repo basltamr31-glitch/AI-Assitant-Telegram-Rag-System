@@ -36,8 +36,9 @@ from app.api.security import require_allowed_user, require_api_key
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.llm.client import create_llm_client
+from app.rag.retrieval import Retriever
 
-API_VERSION = "0.5.0"
+API_VERSION = "0.8.0"
 
 log = get_logger(__name__)
 
@@ -85,7 +86,24 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.app_env == "development" else None,
     )
 
+    # Built here rather than per request: the embedder holds a model that
+    # takes seconds to load. Construction is cheap - the weights load lazily -
+    # so a Qdrant that is down or a model that was never downloaded surfaces
+    # on the first question rather than at startup. That is the honest place
+    # for it: the service is still useful for commands either way.
+    retriever = None
+    if settings.retrieval_enabled:
+        try:
+            retriever = Retriever()
+            log.info("retrieval.ready", collection=settings.qdrant_collection)
+        except Exception as exc:  # noqa: BLE001
+            log.error("retrieval.unavailable", reason=str(exc))
+    else:
+        log.warning("retrieval.disabled", reason="RETRIEVAL_ENABLED is false")
+
     app.state.llm = llm
+    app.state.retriever = retriever
+    app.state.grounded = settings.retrieval_enabled
 
     @app.middleware("http")
     async def trace_and_log(request: Request, call_next):
@@ -132,6 +150,11 @@ def create_app() -> FastAPI:
             env=settings.app_env,
             version=API_VERSION,
             llm="ready" if app.state.llm is not None else "unavailable",
+            retrieval=(
+                "ready"
+                if app.state.retriever is not None
+                else ("disabled" if not app.state.grounded else "unavailable")
+            ),
         )
 
     @app.post(
@@ -147,7 +170,12 @@ def create_app() -> FastAPI:
         require_allowed_user(payload.user_id)
 
         trace_id = structlog.contextvars.get_contextvars().get("trace_id", "")
-        reply, handled_by = await respond(payload, request.app.state.llm)
+        reply, handled_by, sources = await respond(
+            payload,
+            request.app.state.llm,
+            request.app.state.retriever,
+            grounded=request.app.state.grounded,
+        )
 
         log.info(
             "chat.replied",
@@ -158,11 +186,13 @@ def create_app() -> FastAPI:
             # genuinely private. Length is enough to debug with.
             chars_in=len(payload.text),
             chars_out=len(reply),
+            sources=len(sources),
         )
         return ChatResponse(
             reply=reply,
             handled_by=handled_by,
             trace_id=trace_id,
+            sources=sources,
         )
 
     @app.exception_handler(Exception)

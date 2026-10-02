@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "knowledge_base"
 
+    # --- Retrieval (Phase 7-8) -------------------------------------------------
+    # False falls back to Phase 5 behaviour: the model answers from its own
+    # knowledge, ungrounded. Useful only while a corpus is still being built,
+    # and a deliberate operator choice rather than a silent fallback - an
+    # unavailable knowledge base refuses instead of quietly inventing.
+    retrieval_enabled: bool = True
+
     # --- Retrieval (Phase 7) --------------------------------------------------
     # How many passages a search returns before the threshold is applied.
     retrieval_top_k: int = 5

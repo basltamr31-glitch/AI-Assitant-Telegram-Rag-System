@@ -27,6 +27,7 @@ and the refusal rules depend on it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Iterable
 
 from qdrant_client import QdrantClient, models
@@ -62,7 +63,29 @@ class VectorStore:
     def __init__(self, client: QdrantClient | None = None) -> None:
         settings = get_settings()
         self.collection = settings.qdrant_collection
-        self._client = client or QdrantClient(url=settings.qdrant_url)
+        self._url = settings.qdrant_url
+        self._injected = client
+
+    @cached_property
+    def _client(self) -> QdrantClient:
+        """Connect on first use, not on construction.
+
+        `QdrantClient(url=...)` performs a version handshake, so building one
+        eagerly means the API cannot start - or even run its tests - while
+        Qdrant is down. The service is still useful for commands with no
+        vector store at all, so the connection belongs at the first query,
+        where a failure is reportable, rather than at import time where it is
+        a hang.
+        """
+        if self._injected is not None:
+            return self._injected
+        return QdrantClient(
+            url=self._url,
+            timeout=10,
+            # The handshake warns about client/server version drift and costs
+            # a round trip we would otherwise pay on every construction.
+            check_compatibility=False,
+        )
 
     def ensure_collection(self, dimension: int) -> None:
         """Create the collection if missing; refuse a dimension mismatch.

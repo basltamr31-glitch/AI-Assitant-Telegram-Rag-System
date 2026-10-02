@@ -45,6 +45,11 @@ class ChatResponse(BaseModel):
     # logs when you are asking "why did it answer that?"
     handled_by: str
     trace_id: str
+    # Where the answer came from, one entry per cited passage. Empty for a
+    # command or a refusal. Returned rather than only logged because a reader
+    # who cannot check a citation has no reason to trust it - and because
+    # Phase 14 scores answers against the passages they claim to use.
+    sources: list[str] = []
 
 
 class HealthResponse(BaseModel):
@@ -54,3 +59,6 @@ class HealthResponse(BaseModel):
     # "ready" or "unavailable". Says whether the service can reach Claude
     # without revealing anything about the key itself.
     llm: str = "unknown"
+    # "ready", "disabled" or "unavailable" - the difference between an
+    # operator turning grounding off and a knowledge base that is broken.
+    retrieval: str = "unknown"

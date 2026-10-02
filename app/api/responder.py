@@ -2,44 +2,54 @@
 
 This module is the seam.
 ------------------------
-Phase 4 answered with `if/else` and no intelligence, so that a wrong reply
-could only mean a broken pipe. The pipes are proven, so Phase 5 puts Claude
-behind it - and nothing else in the system changed. n8n does not know a model
-exists; `main.py` still calls `respond()` and gets back text.
+Phase 4 answered with `if/else`, so a wrong reply could only mean a broken
+pipe. Phase 5 put a model behind it. Phase 8 puts the user's own documents in
+front of the model, and that is the change that matters: the assistant stops
+answering from what it happens to remember and starts answering from what can
+be shown.
 
-What did *not* arrive with the model
+Why the retrieval is unconditional here
+---------------------------------------
+Every message that is not a command is searched for, every time. That is
+ADR-005's staging: Phase 8 ships a hardcoded RAG workflow and Phase 10 adds
+the agent that *decides* whether to search. It has a visible cost - "مرحبا"
+retrieves nothing and gets told so - and that cost is the argument for Phase
+10. Building the decision first would mean debugging retrieval quality and
+tool selection at the same time, with no known-good baseline for either.
+
+Why nothing found means nothing said
 ------------------------------------
-No memory: every message is a fresh conversation, because there is nowhere to
-store one until Phase 9. No documents: retrieval is Phase 8. The system prompt
-says so plainly, so the assistant admits it rather than inventing a past.
-
-Two kinds of reply
-------------------
-Commands are answered locally, without calling the model. `/ping` asking a
-frontier model to say "pong" would cost real money to answer a question the
-code already knows. Everything else goes to Claude.
+Phase 5 produced a fluent, confident, entirely wrong explanation of Syrian
+contract law from parametric memory alone. Falling back to that behaviour
+whenever retrieval comes up empty would make the knowledge base decorative:
+the system would look grounded exactly when it was, and invent silently the
+rest of the time. So an empty retrieval produces a refusal, not an answer.
 """
 
 from __future__ import annotations
 
 import html
+from typing import Protocol
 
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import sanitise, truncate
 from app.core.logging import get_logger
-from typing import Protocol
-
 from app.llm.base import LLMResult
-from app.llm.prompts import SYSTEM_PROMPT
+from app.llm.prompts import (
+    KNOWLEDGE_BASE_UNAVAILABLE,
+    NOTHING_FOUND,
+    SYSTEM_PROMPT,
+    build_grounded_prompt,
+)
+from app.rag.retrieval import Retrieved
 
 log = get_logger(__name__)
 
 WELCOME = (
     "👋 <b>Hello {name}!</b>\n\n"
-    "Ask me anything and I will answer with Claude.\n\n"
-    "I have <b>no memory</b> of earlier messages and <b>no access</b> to your "
-    "documents yet — both are coming in later phases.\n\n"
-    "Try <code>/help</code> for the commands I handle myself."
+    "اسألني عن مادتك وسأجيب <b>من مستنداتك أنت</b>، مع الإشارة إلى المصدر.\n\n"
+    "إن لم أجد ما يدعم الإجابة، سأقول ذلك بدل أن أخمّن.\n\n"
+    "جرّب <code>/help</code> للأوامر."
 )
 
 HELP = (
@@ -48,25 +58,46 @@ HELP = (
     "<code>/help</code> — this list\n"
     "<code>/ping</code> — check I am awake\n"
     "<code>/whoami</code> — the ids I see for you\n\n"
-    "<b>Anything else</b> goes to Claude.\n\n"
-    "<i>No memory, no documents — yet.</i>"
+    "<b>أي سؤال آخر</b> يُبحث عنه في مستنداتك أولاً.\n\n"
+    "<i>لا ذاكرة للمحادثة بعد — كل رسالة مستقلة.</i>"
 )
 
 MODEL_UNAVAILABLE = (
-    "⚠️ <b>I cannot reach Claude.</b>\n\n"
-    "<code>ANTHROPIC_API_KEY</code> is not set in <code>.env</code>. "
+    "⚠️ <b>I cannot reach the model.</b>\n\n"
+    "No provider is configured: set <code>LLM_PROVIDER</code> and its key — "
+    "<code>OPENROUTER_API_KEY</code> or <code>ANTHROPIC_API_KEY</code> — in "
+    "<code>.env</code>.\n\n"
     "Commands still work — try <code>/help</code>."
 )
 
 MODEL_FAILED = (
-    "⚠️ <b>Claude did not answer.</b>\n\n"
+    "⚠️ <b>The model did not answer.</b>\n\n"
     "The error is in the server log, under this message's trace id. "
     "Try again in a moment."
 )
 
 
+class LLMProtocol(Protocol):
+    """What the responder needs from a model - and nothing more.
+
+    A Protocol rather than a base class: neither provider has to import this
+    or inherit from it, and the fake in the tests satisfies it for free. The
+    responder cannot name a vendor even by accident.
+    """
+
+    async def complete(
+        self, system: str, user_message: str, max_tokens: int = ...
+    ) -> LLMResult: ...
+
+
+class RetrieverProtocol(Protocol):
+    """Just enough of `Retriever` to stand a fake in front of."""
+
+    def retrieve(self, query: str, **kwargs) -> Retrieved: ...
+
+
 def _local_reply(request: ChatRequest, text: str) -> tuple[str, str] | None:
-    """Answer without the model, or return None to mean 'ask Claude'."""
+    """Answer without the model, or return None to mean 'go and look'."""
     name = html.escape(request.first_name) or "there"
 
     if text.startswith("/start"):
@@ -91,55 +122,108 @@ def _local_reply(request: ChatRequest, text: str) -> tuple[str, str] | None:
     return None
 
 
-class LLMProtocol(Protocol):
-    """What the responder needs from a model - and nothing more.
+def _finish(reply: str, handled_by: str, stop_reason: str | None = None) -> tuple[str, str]:
+    """Truncate, sanitise, and refuse to send an empty message.
 
-    A Protocol rather than a base class: neither provider has to import this
-    or inherit from it, and the fake in the tests satisfies it for free. The
-    responder cannot name a vendor even by accident.
+    Truncation comes before sanitising: cutting sanitised HTML could slice a
+    tag in half, whereas sanitising afterwards closes whatever the cut left
+    open. Telegram rejects an empty `sendMessage`, so an empty completion has
+    to become something.
     """
-
-    async def complete(
-        self, system: str, user_message: str, max_tokens: int = ...
-    ) -> LLMResult: ...
+    cleaned = sanitise(truncate(reply))
+    if not cleaned.strip():
+        log.warning("llm.empty_reply", stop_reason=stop_reason)
+        return "I did not manage to answer that. Try rephrasing?", "model.empty"
+    return cleaned, handled_by
 
 
 async def respond(
     request: ChatRequest,
     llm: LLMProtocol | None,
-) -> tuple[str, str]:
-    """Return `(reply_html, handled_by)` for one message.
+    retriever: RetrieverProtocol | None = None,
+    *,
+    grounded: bool = True,
+) -> tuple[str, str, list[str]]:
+    """Return `(reply_html, handled_by, citations)` for one message.
 
-    `llm` is passed in rather than imported so that tests can supply a fake and
-    never touch the network - and so a missing API key degrades to commands
-    instead of taking the whole service down.
+    Dependencies are passed in rather than imported so that tests can supply
+    fakes and never touch the network, and so a missing key or an unavailable
+    knowledge base degrades to something honest instead of taking the service
+    down.
     """
     text = request.text.strip()
 
     local = _local_reply(request, text)
     if local is not None:
-        return local
+        return (*local, [])
 
     if llm is None:
-        return MODEL_UNAVAILABLE, "model.unavailable"
+        return MODEL_UNAVAILABLE, "model.unavailable", []
+
+    # `grounded=False` is an operator's explicit decision to run without a
+    # knowledge base, which is honest. A retriever that is merely *missing*
+    # while grounding is on is a fault, and faults do not get to fall back to
+    # inventing - that is the behaviour this phase exists to remove.
+    if not grounded:
+        try:
+            result = await llm.complete(system=SYSTEM_PROMPT, user_message=text)
+        except Exception:
+            log.exception("llm.call_failed")
+            return MODEL_FAILED, "model.error", []
+        reply, handled_by = _finish(result.text, "model", result.stop_reason)
+        return reply, handled_by, []
+
+    if retriever is None:
+        log.warning("retrieval.unavailable")
+        return KNOWLEDGE_BASE_UNAVAILABLE, "retrieval.unavailable", []
 
     try:
-        result = await llm.complete(system=SYSTEM_PROMPT, user_message=text)
+        found = retriever.retrieve(text)
+    except Exception:
+        log.exception("retrieval.failed")
+        return KNOWLEDGE_BASE_UNAVAILABLE, "retrieval.error", []
+
+    if not found.found:
+        # Deliberate: no passages means no answer. Answering anyway is the
+        # failure this whole phase exists to prevent.
+        log.info(
+            "retrieval.nothing_found",
+            best_rejected=found.best_rejected_score,
+            threshold=found.threshold,
+        )
+        return NOTHING_FOUND, "retrieval.empty", []
+
+    system = build_grounded_prompt(found.as_context())
+    try:
+        result = await llm.complete(system=system, user_message=text)
     except Exception:
         # Deliberately broad, deliberately minimal. Retries, timeouts and
         # fallbacks are Phase 13; today the only promise is that a failing
         # model produces a message rather than silence.
         log.exception("llm.call_failed")
-        return MODEL_FAILED, "model.error"
+        return MODEL_FAILED, "model.error", []
 
-    # Truncate before sanitising: cutting sanitised HTML could slice a tag in
-    # half, whereas sanitising afterwards closes whatever the cut left open.
-    reply = sanitise(truncate(result.text))
+    citations = found.citations()
+    # A bare "[1]" in the answer tells the reader nothing. Appending what the
+    # numbers refer to is what turns a citation into something checkable, and
+    # checkability is the entire reason for retrieving at all. Only the
+    # passages the model actually cited are listed, so a reader is not sent to
+    # look up material the answer never used.
+    cited = [
+        f"[{n}] {c}" for n, c in enumerate(citations, 1) if f"[{n}]" in result.text
+    ]
+    body = result.text
+    if cited:
+        body += "\n\n<i>المصادر:</i>\n" + "\n".join(cited)
 
-    if not reply.strip():
-        # An empty completion is rare but not impossible, and an empty
-        # sendMessage is an error from Telegram rather than a silent no-op.
-        log.warning("llm.empty_reply", stop_reason=result.stop_reason)
-        return "I did not manage to answer that. Try rephrasing?", "model.empty"
+    reply, handled_by = _finish(body, "model.grounded", result.stop_reason)
+    if handled_by != "model.grounded":
+        citations = []
 
-    return reply, "model"
+    log.info(
+        "chat.grounded_reply",
+        passages=len(found.results),
+        best_score=round(found.results[0].score, 3),
+        citations=len(citations),
+    )
+    return reply, handled_by, citations

@@ -6,6 +6,40 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 8] — 2026-10-03 — Grounded answers (code complete, awaiting a corpus)
+
+### Added
+- `GROUNDED_SYSTEM_PROMPT` in `app/llm/prompts.py` — answer only from the
+  passages, cite with `[n]`, and say plainly when the material does not cover
+  the question. Separate rules for mathematics (the passages give the method;
+  the reasoning is the model's, and the numbers from a worked example are not
+  the user's numbers) and for law (quote the article, and say this is not
+  legal advice).
+- `ChatResponse.sources` — the citations, returned rather than only logged.
+- `RETRIEVAL_ENABLED` — an operator's explicit switch back to ungrounded
+  answering, for use while a corpus is still being built.
+- 9 more API tests covering the grounded path.
+
+### Changed
+- `app/api/responder.py` retrieves on every non-command message, and the
+  answer appends what each `[n]` refers to. A bare `[1]` cannot be checked,
+  and checkability is the whole reason for retrieving.
+- `app/rag/store.py` connects to Qdrant on first use rather than at
+  construction. The eager version made the API hang at startup - and the test
+  suite hang outright - whenever Qdrant was down.
+- `API_VERSION` is `0.8.0`; `/healthz` distinguishes retrieval `ready`,
+  `disabled` and `unavailable`.
+
+### Notes
+- **An empty search is a refusal, and a broken knowledge base is a refusal.**
+  Neither falls back to the model's own knowledge. Phase 5 showed exactly what
+  that fallback produces: fluent, confident, wrong Arabic about contract law,
+  with nothing to signal it was invented.
+- Retrieval is unconditional, so `مرحبا` retrieves nothing and is told so.
+  That cost is ADR-005's staging, and the argument for the agent in Phase 10.
+
+---
+
 ## [Phase 7] — 2026-10-03 — Retrieval, and a way to look at it
 
 ### Added
