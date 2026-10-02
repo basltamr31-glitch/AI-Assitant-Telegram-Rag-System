@@ -16,10 +16,19 @@ __pycache__/
 htmlcov/
 
 # --- Local data ------------------------------------------------------------
-# Source documents are yours, not the repo's. Keep the folder, ignore contents.
+# Source documents are yours, not the repo's: large, copyrighted, and not
+# something a clone should have to download. `material/` is DOCUMENTS_DIR.
+# Learned by pushing a 118 MB textbook at GitHub's 100 MB limit.
+material/*
+!material/.gitkeep
 data/documents/*
 !data/documents/.gitkeep
 data/exports/
+
+# Derived from those documents, and reproducible from them. The OCR cache in
+# particular is large and machine-specific; it is a cache, not a source.
+data/ocr_cache/
+data/ocr_test/
 
 # --- Editors / OS ----------------------------------------------------------
 .vscode/

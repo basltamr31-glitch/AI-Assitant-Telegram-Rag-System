@@ -88,6 +88,29 @@ class Settings(BaseSettings):
     # ADR-011: Cloud during development, back to the container in Phase 15.
     n8n_base_url: str = "http://localhost:5678"
 
+    # --- Ingestion (Phase 6) --------------------------------------------------
+    # Where source documents live. Gitignored: these are not ours to commit.
+    documents_dir: str = "material"
+    # OCR results are cached per page so a run can be resumed. Re-reading 232
+    # pages because the laptop slept is not a cost worth paying twice.
+    ocr_cache_dir: str = "data/ocr_cache"
+    # A vision model that reads Arabic and writes LaTeX. Free, and rate
+    # limited - which is fine here, because ingestion is offline and a retry
+    # costs nothing but time. See ADR-016.
+    ocr_model: str = "dots-studio/dots-3-note-preview:free"
+    ocr_max_retries: int = 6
+    # Long side, in pixels, that page images are scaled to before OCR. The
+    # source scans are ~300 dpi; 1500 keeps the glyphs legible while keeping
+    # the request small.
+    ocr_image_max_px: int = 1500
+
+    # --- Embeddings (Phase 6) -------------------------------------------------
+    # Multilingual, because the corpus is Arabic (ADR-003 as amended by
+    # ADR-016). Changing this invalidates every stored vector and forces a
+    # full re-ingestion, so it is not a casual edit.
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_batch_size: int = 8
+
     # --- Qdrant ---------------------------------------------------------------
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "knowledge_base"
@@ -144,6 +167,8 @@ class Settings(BaseSettings):
             "n8n_base_url": self.n8n_base_url,
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
+            "embedding_model": self.embedding_model,
+            "ocr_model": self.ocr_model,
             "postgres": f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}",
             "llm_provider": self.llm_provider,
             "anthropic_model": self.anthropic_model,
