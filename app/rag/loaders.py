@@ -84,3 +84,19 @@ def load_pdf(path: str | Path, image_max_px: int = 1500) -> Iterator[Page]:
             continue
 
         yield Page(number=index, text=None, image_png=image)
+
+
+def document_sha(path: str | Path) -> str:
+    """A cheap, stable identity for a source file.
+
+    Hashing 118 MB takes under a second and happens once per run, whereas
+    extracting one page image costs about 1.5 seconds. Keying the OCR cache on
+    this lets a resumed run skip extraction entirely for pages it already has.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()[:16]

@@ -33,15 +33,23 @@ import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
+from app.rag.quality import check_page, strip_preamble
 
 log = get_logger(__name__)
 
-PROMPT = (
-    "Transcribe all text on this textbook page exactly as it appears, in "
-    "Arabic. Write mathematics in LaTeX, using $...$ inline and $$...$$ for "
-    "display. Preserve the numbering of exercises and sections. Output only "
-    "the transcription, with no commentary and no translation."
-)
+PROMPT = """Transcribe all text on this textbook page exactly as it appears.
+
+Rules:
+- The page is in Arabic. Every Arabic word must stay Arabic. Never translate
+  a word into English, not even a technical term: write التابع, never
+  "function" or "follow".
+- Write mathematics in LaTeX: $...$ inline, $$...$$ on its own line.
+- Do NOT wrap the whole page in one LaTeX environment. Arabic prose is prose;
+  only formulas belong inside $ delimiters.
+- Keep the numbering of exercises and sections exactly as printed.
+- If something is unreadable, write [غير واضح] rather than guessing.
+- Output the transcription only: no commentary, no summary, no translation.
+"""
 
 
 class OcrError(RuntimeError):
@@ -59,6 +67,14 @@ class PageCache:
         return self.dir / f"page_{page_number:04d}.json"
 
     def get(self, page_number: int, image_sha: str) -> str | None:
+        """Return the cached text, or None.
+
+        `image_sha` may be the hash of the source *document* rather than of
+        the page image. That matters for speed: extracting a page image from
+        this PDF costs about 1.5 seconds, so checking the cache by image hash
+        meant paying 6 minutes of extraction to discover a full cache. Keyed
+        on the document instead, a resumed run reads nothing it already has.
+        """
         path = self._path(page_number)
         if not path.exists():
             return None
@@ -99,8 +115,9 @@ class VisionOcr:
         key = settings.openrouter_api_key.get_secret_value()
         if not key:
             raise OcrError("OPENROUTER_API_KEY is not set - OCR needs it.")
-        self._model = settings.ocr_model
+        self._models = settings.ocr_model_list
         self._max_retries = settings.ocr_max_retries
+        self._min_arabic = settings.ocr_min_arabic_ratio
         self._client = client or httpx.Client(
             base_url=settings.openrouter_base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {key}"},
@@ -108,9 +125,29 @@ class VisionOcr:
         )
 
     def read(self, image_png: bytes) -> str:
+        """Transcribe one page, trying each model in the chain in turn.
+
+        Returns the first transcription that passes the quality gate. Raises
+        `OcrError` only when every model in the chain has been exhausted -
+        which the caller should record and move past, not treat as fatal. One
+        unreadable page out of 226 is a page to review by hand, not a reason
+        to abandon a book.
+        """
         b64 = base64.b64encode(image_png).decode()
+        problems: list[str] = []
+
+        for model in self._models:
+            try:
+                return self._read_with(model, b64)
+            except OcrError as exc:
+                log.warning("ocr.model_exhausted", model=model, reason=str(exc))
+                problems.append(f"{model}: {exc}")
+
+        raise OcrError("every model failed -> " + " | ".join(problems))
+
+    def _read_with(self, model: str, b64: str) -> str:
         payload = {
-            "model": self._model,
+            "model": model,
             # Generous: a dense page of exercises produced ~950 tokens, and a
             # truncated transcription is worse than none because it looks
             # complete.
@@ -143,24 +180,35 @@ class VisionOcr:
                 # had already survived the rate limiter.
                 log.info(
                     "ocr.network_retry",
+                    model=model,
                     error=type(exc).__name__,
                     attempt=attempt,
-                    of=self._max_retries,
                 )
                 self._sleep(attempt)
                 continue
 
             if response.status_code == 200:
-                data = response.json()
-                choice = data["choices"][0]
-                text = (choice["message"].get("content") or "").strip()
-                if not text:
-                    # Usually means the model thought until it ran out of
-                    # budget. Retrying can help; failing silently cannot.
+                try:
+                    choice = response.json()["choices"][0]
+                except (KeyError, IndexError, ValueError):
+                    # A 200 carrying an error body. Seen from more than one
+                    # free provider; crashing on it would end the run.
+                    log.warning("ocr.malformed_response", model=model)
+                    self._sleep(attempt)
+                    continue
+
+                text = strip_preamble(choice["message"].get("content") or "")
+                problem = check_page(text, self._min_arabic)
+                if problem is not None:
+                    # A transcription that is visibly wrong is worse than a
+                    # missing one: it gets embedded, indexed, and silently
+                    # fails to match anything for the rest of the system's
+                    # life. Retrying is cheap; a poisoned index is not.
                     log.warning(
-                        "ocr.empty_response",
+                        "ocr.rejected",
+                        model=model,
+                        reason=str(problem),
                         attempt=attempt,
-                        finish_reason=choice.get("finish_reason"),
                     )
                     self._sleep(attempt)
                     continue
@@ -169,16 +217,16 @@ class VisionOcr:
             if response.status_code in (429, 500, 502, 503, 504):
                 log.info(
                     "ocr.retrying",
+                    model=model,
                     status=response.status_code,
                     attempt=attempt,
-                    of=self._max_retries,
                 )
                 self._sleep(attempt, response.headers.get("retry-after"))
                 continue
 
-            raise OcrError(f"HTTP {response.status_code}: {response.text[:300]}")
+            raise OcrError(f"HTTP {response.status_code}: {response.text[:200]}")
 
-        raise OcrError(f"gave up after {self._max_retries} attempts")
+        raise OcrError(f"{self._max_retries} attempts exhausted")
 
     @staticmethod
     def _sleep(attempt: int, retry_after: str | None = None) -> None:

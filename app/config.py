@@ -94,11 +94,30 @@ class Settings(BaseSettings):
     # OCR results are cached per page so a run can be resumed. Re-reading 232
     # pages because the laptop slept is not a cost worth paying twice.
     ocr_cache_dir: str = "data/ocr_cache"
-    # A vision model that reads Arabic and writes LaTeX. Free, and rate
-    # limited - which is fine here, because ingestion is offline and a retry
-    # costs nothing but time. See ADR-016.
-    ocr_model: str = "dots-studio/dots-3-note-preview:free"
-    ocr_max_retries: int = 6
+    # Vision models that read Arabic and write LaTeX, tried in order until one
+    # produces output that passes the quality gate. A chain rather than a
+    # single model because the failures measured on this corpus are of two
+    # kinds that no one model avoids: free models return 429 unpredictably,
+    # and each model has pages it mangles *consistently* - dots-3 emits the
+    # Chinese word for "ending" on page 60 of the maths book, six times out of
+    # six. Retrying a systematic failure is just waiting; another model is the
+    # only thing that helps. Comma-separated. See ADR-016.
+    ocr_models: str = (
+        "dots-studio/dots-3-note-preview:free,"
+        "qwen/qwen3.8-27b:free,"
+        "google/gemma-4-31b-it:free"
+    )
+    # Share of letters that must be Arabic for a page to be accepted. Very
+    # low on purpose: page 60 of the maths book measured 14% Arabic by letter,
+    # because a page of exercises is mostly LaTeX and rac and \lim are
+    # Latin. This is a coarse net for a page that came back translated into
+    # English, not a judgement about how much mathematics a page contains.
+    # The foreign-script check is the precise one.
+    ocr_min_arabic_ratio: float = 0.10
+    # Four, not more: the chain is what provides resilience here. Retrying a
+    # systematic failure past a few attempts is just waiting, and a 226-page
+    # run cannot afford six backoffs per model per page.
+    ocr_max_retries: int = 4
     # Long side, in pixels, that page images are scaled to before OCR. The
     # source scans are ~300 dpi; 1500 keeps the glyphs legible while keeping
     # the request small.
@@ -139,6 +158,11 @@ class Settings(BaseSettings):
         )
 
     @property
+    def ocr_model_list(self) -> list[str]:
+        """`ocr_models` split into the chain it describes."""
+        return [m.strip() for m in self.ocr_models.split(",") if m.strip()]
+
+    @property
     def telegram_allowed_ids(self) -> set[int]:
         """Parse "123,456" into {123, 456}. Empty string -> empty set.
 
@@ -168,7 +192,7 @@ class Settings(BaseSettings):
             "qdrant_url": self.qdrant_url,
             "qdrant_collection": self.qdrant_collection,
             "embedding_model": self.embedding_model,
-            "ocr_model": self.ocr_model,
+            "ocr_models": self.ocr_models,
             "postgres": f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}",
             "llm_provider": self.llm_provider,
             "anthropic_model": self.anthropic_model,
