@@ -6,6 +6,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 7] — 2026-10-03 — Retrieval, and a way to look at it
+
+### Added
+- `app/rag/retrieval.py` — normalises the query with the same function the
+  documents went through, embeds it, searches, and applies the threshold.
+- `scripts/search.py` — ask the knowledge base from the terminal and see the
+  passages and their scores, with no model in the way rewriting the evidence
+  into something plausible. `--threshold 0` shows the near-misses.
+- `tests/test_retrieval.py` — 13 tests, all against fakes. What is tested is
+  the decision logic; whether the vectors are good is Phase 14's question.
+
+### Notes
+- **Below the threshold, nothing is returned.** Phase 5 showed why: asked
+  about Syrian contract law with no retrieval, the model produced fluent,
+  well-formed, entirely wrong Arabic. Retrieval that hands back near-misses
+  would feed exactly that answer, with citations attached - worse than no
+  citations, because it looks checked.
+- Near-misses are kept and reported rather than discarded, so "nothing above
+  0.45, best was 0.41" is a diagnosis instead of a mystery.
+- The threshold is 0.45 and that is a guess, stated rather than hidden. Phase
+  14 tunes it against an eval set.
+
+---
+
 ## [Phase 6] — 2026-10-02 — Ingestion for scanned Arabic books (in progress)
 
 The first real corpus is a 232-page Syrian curriculum maths textbook, and
