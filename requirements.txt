@@ -21,7 +21,11 @@ uvicorn[standard]>=0.30  # ASGI server that actually runs it
 # --- Phase 5: the model ------------------------------------------------------
 anthropic>=0.40          # official SDK; ADR-004 keeps it behind an adapter
 
+# --- Phase 6: ingestion ------------------------------------------------------
+pypdf>=4.0               # reads PDFs; per-page text and images
+pillow>=10.0             # scales page images before they go to OCR
+sentence-transformers>=3.0  # local embeddings (ADR-003); pulls torch
+
 # Added later:
-#   Phase 6  pypdf, python-docx, openpyxl, python-pptx, beautifulsoup4,
-#            sentence-transformers
+#   Phase 6  python-docx, openpyxl, python-pptx, beautifulsoup4 (later slices)
 #   Phase 11 mcp

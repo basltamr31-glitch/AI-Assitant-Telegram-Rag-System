@@ -57,8 +57,16 @@ class OcrError(RuntimeError):
     """Raised when a page could not be read after every retry."""
 
 
+# Bumped whenever a change to the post-processing would produce different text
+# from the same page: preamble stripping, LaTeX unwrapping, normalisation. The
+# cache records it, and a record from an older version is treated as a miss.
+# Found the need the hard way - pages cached before `unwrap` existed sat in the
+# cache as egin{tabular} blobs and would never have been re-read.
+PIPELINE_VERSION = 2
+
+
 class PageCache:
-    """One JSON file per page, named by the hash of the image it holds."""
+    """One JSON file per page, tagged with the pipeline that produced it."""
 
     def __init__(self, root: str | Path, document_id: str) -> None:
         self.dir = Path(root) / document_id
@@ -90,6 +98,9 @@ class PageCache:
         # produces a different image and is read again.
         if record.get("image_sha") != image_sha:
             return None
+        if record.get("pipeline_version") != PIPELINE_VERSION:
+            log.info("ocr.cache_stale", page=page_number)
+            return None
         return record.get("text")
 
     def put(self, page_number: int, image_sha: str, text: str, model: str) -> None:
@@ -98,6 +109,7 @@ class PageCache:
                 {
                     "page": page_number,
                     "image_sha": image_sha,
+                    "pipeline_version": PIPELINE_VERSION,
                     "model": model,
                     "text": text,
                 },
