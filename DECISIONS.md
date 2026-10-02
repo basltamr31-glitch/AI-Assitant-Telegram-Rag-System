@@ -55,7 +55,9 @@ the correct home for relational data and will also back n8n in production.
 
 ## ADR-003 — Local embeddings via sentence-transformers
 
-**Date:** 2026-09-06 · **Status:** Accepted
+**Date:** 2026-09-06 · **Status:** Accepted; amended by ADR-016, which
+settles the model choice. The corpus is Arabic, so the English-only option
+considered below is not available.
 
 **Decision.** Embeddings are generated locally. The embedder sits behind an
 `embed(texts) -> vectors` interface.
@@ -178,6 +180,131 @@ concerns (backups, HTTPS, monitoring).
 
 **Tradeoffs.** Workflows are exported to `n8n/` in Git, so the development
 database is never the source of truth and the migration is low risk.
+
+---
+
+## ADR-016 — Ingestion for scanned Arabic books: vision OCR, a model chain, and a multilingual embedder
+
+**Date:** 2026-10-02 · **Status:** Accepted (amends ADR-003)
+
+**Context.** The first real corpus is `12-sci-math-1.pdf`, a 232-page Syrian
+curriculum maths textbook, with Arabic legal material to follow. Inspecting it
+settled several questions that had been open since Phase 0.
+
+**What the book turned out to be.** Not a scan and not a born-digital PDF, but
+a hybrid: produced in Adobe InDesign, with 6 pages carrying real text (the
+copyright page, the contents) and 226 carrying only their page number as text
+plus a 2421x3307 image of the page at roughly 300 dpi. Asking "is this PDF
+scanned?" gives the wrong answer either way, so the loader asks per page. That
+also makes the ordinary cases free: a born-digital legal PDF never reaches OCR.
+
+---
+
+### Decision 1 — OCR through a vision model, not a dedicated OCR engine
+
+Tesseract with the Arabic pack is the obvious choice and was rejected. Arabic
+is among the hardest scripts for classical OCR — letters join, each has up to
+four contextual forms, and diacritics confuse segmentation — and this is a
+*maths* textbook, where the equations matter as much as the prose. Tesseract
+has no useful notion of a formula.
+
+A vision model reads both at once. Measured on page 60: correct Arabic prose,
+correct LaTeX for the limits and fractions, exercise numbering preserved, in
+about 13 seconds at zero cost.
+
+**Tradeoff.** A language model transcribing is a language model, and it
+hallucinates where an OCR engine would simply produce nonsense. That is worse,
+because nonsense is obvious and a plausible mistranslation is not. Decisions 3
+and 4 exist because of it.
+
+### Decision 2 — Free models, because ingestion is offline
+
+ADR-015 set the rule: free where a retry costs only time, paid where latency
+matters. Nobody waits for ingestion, so a `429` is an inconvenience rather
+than a failure, and OCR is paid for once per book.
+
+**Tradeoff, measured.** Free-tier rate limiting dominates: 24 pages took about
+30 minutes, which extrapolates to roughly 5 hours for the book, against 8-13
+seconds per page of actual model time. A few dollars of credit would cut that
+to under an hour. The free path stays the default and `OCR_MODELS` is one line
+in `.env`.
+
+### Decision 3 — A chain of models, not one with retries
+
+`dots-3-note-preview` emitted the Chinese word 结尾 on page 60 six times out of
+six, then four out of four after a prompt change. That is a systematic failure,
+and retrying a systematic failure is just waiting. The client walks a chain and
+takes the first transcription that passes the quality gate; on that page it
+fell through to `qwen`, absorbed two rate limits, and returned clean text.
+
+### Decision 4 — A quality gate, because the failures are invisible
+
+The models produced `لل-follow` where the page said `للتابع`, and `ل那麼` where
+it said `ليكن`. Neither raises an error. Neither is visible in a
+2000-character transcription. Both would be embedded, indexed, and then
+silently fail to match anything for the life of the system — the worst class of
+bug this project can have, because nothing ever reports it.
+
+The gate rejects scripts that cannot belong in an Arabic corpus, and pages
+that came back translated into English. The Arabic-ratio threshold is 10%,
+because a page of exercises measures about 13%: it is mostly LaTeX, and the
+letters in `\frac` and `\lim` are Latin. The foreign-script check is the
+precise instrument; the ratio is a coarse net.
+
+Pages that defeat every model are recorded in `failures.json` and skipped. One
+unreadable page in 226 is a page to review by hand, not a reason to abandon a
+book.
+
+### Decision 5 — A versioned, resumable page cache
+
+226 pages at 13 seconds is not work worth losing to a dropped connection — and
+a dropped connection is exactly what ended the first run. Every page is written
+to disk the moment it is read, keyed by the hash of the source document so a
+resumed run skips even the image extraction, which costs 1.5 seconds a page.
+
+The cache also records a `PIPELINE_VERSION`. Pages cached before `unwrap`
+existed sat there as `\begin{tabular}` blobs and would never have been re-read;
+a version bump turns that into a miss instead of a permanent corruption.
+
+### Decision 6 — The embedder must be multilingual (this amends ADR-003)
+
+ADR-003 left open the possibility of "a stronger, smaller English model".
+The corpus is Arabic, so that option is gone. `BAAI/bge-m3` is the default:
+the strongest open multilingual retriever that runs on a laptop, with an
+8192-token window that suits legal articles, which are long and lose their
+meaning when cut.
+
+ADR-003's other commitments stand unchanged — embeddings are local, so
+document text never leaves the machine, whichever chat model is answering.
+
+**Tradeoff.** 2.2 GB on disk and slow CPU embedding. Acceptable at the stated
+volume of about ten books at a time, and the alternative — a hosted embedding
+API — would send every page of every document to a third party.
+
+**Consequence.** Changing `EMBEDDING_MODEL` invalidates every stored vector.
+The Qdrant collection records the dimension and the store refuses a mismatch,
+so this surfaces as a loud error rather than as search that is quietly worse.
+
+### Decision 7 — Chunk by domain; one collection with a filter
+
+The curriculum's unit is a numbered exercise and law's unit is an article.
+Both are what a person would cite, which is what makes a retrieved passage
+checkable. Display mathematics is never split.
+
+Both domains share one Qdrant collection behind an indexed `domain` filter
+rather than one collection each. A collection per subject means two
+configurations and two places to get the dimension wrong, for a filter Qdrant
+applies cheaply — and it would fork the pipeline this project is explicitly
+trying to keep as one template configured per corpus.
+
+**Note on the chunk pattern.** It was wrong twice, and both times the output
+looked reasonable. First it assumed `**20**` where the book writes `**20.**`,
+matched nothing, and sent every page to the paragraph fallback. Loosened, it
+then matched the `(1)` and `ا.` items *inside* an exercise, producing 111
+chunks at a median of 110 characters — every sub-question severed from the stem
+that gave it meaning. Neither failure announced itself. The lesson is recorded
+here because it will recur with the legal corpus: chunk boundaries have to be
+read, not assumed.
 
 ---
 

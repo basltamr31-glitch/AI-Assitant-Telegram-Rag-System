@@ -6,6 +6,45 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 6] — 2026-10-02 — Ingestion for scanned Arabic books (in progress)
+
+The first real corpus is a 232-page Syrian curriculum maths textbook, and
+inspecting it settled questions that had been open since Phase 0. **ADR-016**
+records all of it, including what was tried and rejected.
+
+### Added
+- `app/rag/loaders.py` — per-page decision between extractable text and an
+  image for OCR. The book is a hybrid: 6 text pages, 226 images.
+- `app/rag/ocr.py` — vision OCR with a model chain, a versioned resumable
+  cache, retries for rate limits and network drops, and a quality gate.
+- `app/rag/quality.py` — rejects foreign scripts and translated pages.
+- `app/rag/normalise.py` — Arabic normalisation for documents and queries
+  alike, preserving ta marbuta and alef maqsura.
+- `app/rag/latex_unwrap.py` — recovers prose a model buried in `	ext{}`.
+- `app/rag/chunking.py` — exercises for curriculum, articles for law,
+  paragraphs as a fallback; display mathematics is never split.
+- `app/rag/embedder.py` — local `BAAI/bge-m3`, with `embed_documents` and
+  `embed_query` kept separate because retrieval models are asymmetric.
+- `app/rag/store.py` — Qdrant, one collection with an indexed `domain` filter,
+  refusing a dimension mismatch outright.
+- `scripts/ocr_book.py` (slow, once per book) and `scripts/ingest.py` (fast,
+  re-runnable whenever chunking changes).
+- 50 new tests, every rejection case taken from output a model really produced.
+
+### Changed
+- **ADR-003 amended by ADR-016**: the corpus is Arabic, so the English-only
+  embedding model it left open is not available.
+- `material/` gitignored. GitHub refused the 118 MB textbook, which was the
+  right answer to the wrong commit.
+
+### Measured
+- OCR: 8-13 seconds per page of model time, but free-tier rate limiting makes
+  it ~5 hours for the book. Paid models would cut that to under an hour.
+- Chunking: 44 chunks at a median of 522 characters, after two wrong patterns
+  that both produced listings which looked perfectly reasonable.
+
+---
+
 ## [ADR-015] — 2026-09-29 — OpenRouter, and cost the provider reports
 
 ### Added
