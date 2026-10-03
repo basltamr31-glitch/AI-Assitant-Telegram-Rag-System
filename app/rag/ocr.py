@@ -131,10 +131,13 @@ class VisionOcr:
         self._models = settings.ocr_model_list
         self._max_retries = settings.ocr_max_retries
         self._min_arabic = settings.ocr_min_arabic_ratio
+        self._page_budget = settings.ocr_page_budget_seconds
         self._client = client or httpx.Client(
             base_url=settings.openrouter_base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {key}"},
-            timeout=httpx.Timeout(300.0, connect=10.0),
+            timeout=httpx.Timeout(
+                float(settings.ocr_request_timeout_seconds), connect=10.0
+            ),
         )
 
     def read(self, image_png: bytes) -> str:
@@ -148,17 +151,21 @@ class VisionOcr:
         """
         b64 = base64.b64encode(image_png).decode()
         problems: list[str] = []
+        deadline = time.monotonic() + self._page_budget
 
         for model in self._models:
+            if time.monotonic() > deadline:
+                problems.append(f"budget of {self._page_budget}s exhausted")
+                break
             try:
-                return self._read_with(model, b64)
+                return self._read_with(model, b64, deadline)
             except OcrError as exc:
                 log.warning("ocr.model_exhausted", model=model, reason=str(exc))
                 problems.append(f"{model}: {exc}")
 
         raise OcrError("every model failed -> " + " | ".join(problems))
 
-    def _read_with(self, model: str, b64: str) -> str:
+    def _read_with(self, model: str, b64: str, deadline: float) -> str:
         payload = {
             "model": model,
             # Generous: a dense page of exercises produced ~950 tokens, and a
@@ -184,6 +191,8 @@ class VisionOcr:
         }
 
         for attempt in range(1, self._max_retries + 1):
+            if time.monotonic() > deadline:
+                raise OcrError("page budget exhausted")
             try:
                 response = self._client.post("/chat/completions", json=payload)
             except httpx.RequestError as exc:

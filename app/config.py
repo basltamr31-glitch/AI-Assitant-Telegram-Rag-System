@@ -118,6 +118,15 @@ class Settings(BaseSettings):
     # systematic failure past a few attempts is just waiting, and a 226-page
     # run cannot afford six backoffs per model per page.
     ocr_max_retries: int = 4
+    # A hard ceiling on how long one page may take, across every model and
+    # every retry. Without it the arithmetic is brutal: 3 models x 4 attempts
+    # x a 300s request timeout is 62 minutes, and a run really did sit on one
+    # page for 50 of them. A page that cannot be read in five minutes is a
+    # page to look at by hand, not one to keep waiting for.
+    ocr_page_budget_seconds: int = 300
+    # Per request. Pages measured at 8-13 seconds, so this is ample headroom
+    # and still far below the point where a hang costs the whole run.
+    ocr_request_timeout_seconds: int = 90
     # Long side, in pixels, that page images are scaled to before OCR. The
     # source scans are ~300 dpi; 1500 keeps the glyphs legible while keeping
     # the request small.
