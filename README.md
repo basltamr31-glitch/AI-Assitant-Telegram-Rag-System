@@ -74,6 +74,41 @@ ngrok http 5678 --url=$WEBHOOK_URL
 #    activated in the editor at http://localhost:5678.
 ```
 
+### Working with documents (Phase 6-8)
+
+Three steps, **run one at a time**. They are separate commands because two of
+them are slow and only one of them is cheap to repeat.
+
+```bash
+# 1. Fetch the embedding model. Once, ~2.2 GB, resumable.
+.venv\Scripts\python.exe scripts/fetch_model.py
+
+# 2. Read a book into the OCR cache. Hours for a scanned book, and safe to
+#    interrupt: every page is written as it is read and a re-run skips it.
+.venv\Scripts\python.exe scripts/ocr_book.py material/your-book.pdf
+
+# 3. Chunk, embed and store. Minutes. Re-run freely - this is the cheap half,
+#    which is why it is separate from step 2.
+.venv\Scripts\python.exe scripts/ingest.py your-book --domain curriculum
+
+# Then look at what retrieval actually returns, before trusting it:
+.venv\Scripts\python.exe scripts/search.py "سؤالك" --threshold 0
+```
+
+**Do not run these at the same time.** Steps 1 and 3 both want the embedding
+model, and two processes downloading the same file end up with two partial
+copies and no model - 1.2 GB of progress was lost that way. Step 3 also needs
+step 2 to have finished, or it ingests whatever happens to be cached so far.
+
+**Always `.venv\Scripts\python.exe`, never bare `python`.** The system
+interpreter does not have this project's dependencies, and the failure is not
+always a clean error: a script can get far enough to compete for a download
+before it discovers what it is missing.
+
+Once a corpus is ingested, set `RETRIEVAL_ENABLED=true` in `.env` and restart
+the API. Until then the assistant answers ungrounded, which `/healthz` reports
+as `retrieval: disabled`.
+
 Services once running:
 
 | Service | URL |
