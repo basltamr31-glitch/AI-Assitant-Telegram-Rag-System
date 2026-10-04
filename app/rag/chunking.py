@@ -54,10 +54,14 @@ _EXERCISE = re.compile(
 )
 
 # An article of law: المادة followed by a number, in Arabic or Western digits.
+# An article of law. Two orderings, because PDF text extraction does not
+# always preserve the visual one: a page that reads `المادة 109` can extract as
+# `109المادة`, with the number first. The Syrian penal code does exactly
+# that, and a pattern that only knew the natural order found zero articles
+# in 121 pages while looking entirely reasonable.
 _ARTICLE = re.compile(
-    r"^\s*(?:المادة|مادة)\s*"
-    r"[\(ـ\s]*([0-9٠-٩]{1,4})",
-    re.MULTILINE,
+    r"(?m)^[\s\(ـ]*(?:(?:المادة|مادة)[\s\(ـ]*([0-9٠-٩]{1,4})"
+    r"|([0-9٠-٩]{1,4})[\s\(ـ]*(?:المادة|مادة))"
 )
 
 # Display mathematics, which must never be cut through.

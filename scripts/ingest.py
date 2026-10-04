@@ -21,8 +21,10 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.rag.boilerplate import strip_boilerplate
 from app.rag.chunking import Chunk, chunk_page
 from app.rag.embedder import LocalEmbedder
+from app.rag.normalise import normalise
 from app.rag.store import VectorStore
 
 log = get_logger(__name__)
@@ -83,6 +85,18 @@ def main() -> int:
 
     pages = load_cached_pages(cache_dir)
     source = f"{args.document}.pdf"
+
+    # Running headers are invisible from inside one page and obvious across a
+    # document. Stripping them here, where the whole document is in hand, is
+    # the only place it can be done at all.
+    # Normalising here rather than in the OCR cache: the rules change as new
+    # documents reveal new damage, and re-running this is free while
+    # re-reading a page is not. `normalise` is idempotent, so pages cached by
+    # an older pipeline that normalised on the way in come out the same.
+    texts = strip_boilerplate([normalise(p.get("text", "")) for p in pages])
+    for page, text in zip(pages, texts):
+        page["text"] = text
+
     chunks = build_chunks(pages, source, args.domain)
 
     print(f"document : {source}")

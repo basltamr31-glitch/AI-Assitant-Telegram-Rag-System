@@ -1,5 +1,12 @@
 """Read every page of a book into the OCR cache.
 
+The cache holds the *raw* transcription, deliberately. Normalisation is cheap
+and its rules keep changing as new documents reveal new damage - presentation
+forms, doubled headings, running headers - while re-reading a page costs an
+API request out of a daily allowance. Keeping the expensive artifact raw means
+a normalisation fix is a re-ingest, which is free, instead of a re-read, which
+is not.
+
 This is the slow half of ingestion, separated from the rest on purpose. Reading
 226 scanned pages through free vision models takes an hour or two; chunking and
 embedding the result takes minutes. Keeping them apart means the expensive work
@@ -26,7 +33,6 @@ from pathlib import Path
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.rag.loaders import document_sha, load_pdf
-from app.rag.normalise import normalise
 from app.rag.ocr import OcrError, PageCache, QuotaExhausted, VisionOcr
 
 log = get_logger(__name__)
@@ -77,7 +83,7 @@ def main() -> int:
         # A page whose text came straight out of the PDF needs no model.
         if not page.needs_ocr:
             if page.text:
-                cache.put(page.number, doc_sha, normalise(page.text), "pdf-text")
+                cache.put(page.number, doc_sha, page.text, "pdf-text")
                 skipped += 1
             continue
 
@@ -87,7 +93,7 @@ def main() -> int:
 
         page_started = time.time()
         try:
-            text = normalise(ocr.read(page.image_png))
+            text = ocr.read(page.image_png)
         except QuotaExhausted as exc:
             log.error("ocr.quota_exhausted", page=page.number)
             print()
