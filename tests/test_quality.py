@@ -93,3 +93,55 @@ def test_an_arabic_line_ending_in_a_colon_is_kept() -> None:
     """The dangerous false positive: Arabic prose often ends in a colon."""
     src = "المستقيم الذي معادلته:\n$x = 3$"
     assert strip_preamble(src) == src
+
+
+# --- telling a daily allowance from an ordinary rate limit -------------------
+
+
+def test_a_daily_quota_is_recognised_from_the_body() -> None:
+    """OpenRouter's wording, verbatim from a real 429."""
+    import httpx
+
+    from app.rag.ocr import _is_daily_quota
+
+    response = httpx.Response(
+        429,
+        json={
+            "error": {
+                "message": "Rate limit exceeded: free-models-per-day",
+                "metadata": {"limit_source": "openrouter_free_tier_daily"},
+            }
+        },
+    )
+    assert _is_daily_quota(response) is True
+
+
+def test_a_daily_quota_is_recognised_from_the_header() -> None:
+    import httpx
+
+    from app.rag.ocr import _is_daily_quota
+
+    response = httpx.Response(429, headers={"x-ratelimit-remaining": "0"}, json={})
+    assert _is_daily_quota(response) is True
+
+
+def test_an_ordinary_rate_limit_is_not_a_daily_quota() -> None:
+    """"Slow down" is worth retrying; "come back tomorrow" is not."""
+    import httpx
+
+    from app.rag.ocr import _is_daily_quota
+
+    response = httpx.Response(
+        429,
+        headers={"x-ratelimit-remaining": "17"},
+        json={"error": {"message": "temporarily rate-limited upstream"}},
+    )
+    assert _is_daily_quota(response) is False
+
+
+def test_a_body_that_is_not_json_does_not_crash_the_check() -> None:
+    import httpx
+
+    from app.rag.ocr import _is_daily_quota
+
+    assert _is_daily_quota(httpx.Response(429, text="<html>502</html>")) is False

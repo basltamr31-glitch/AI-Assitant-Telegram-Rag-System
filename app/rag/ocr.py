@@ -57,6 +57,17 @@ class OcrError(RuntimeError):
     """Raised when a page could not be read after every retry."""
 
 
+class QuotaExhausted(OcrError):
+    """The provider's daily allowance is gone; waiting will not help today.
+
+    Distinct from an ordinary 429, which means "slow down" and is worth
+    retrying. OpenRouter's free tier allows 50 requests *per day*, and a run
+    that treats that as a transient rate limit will patiently exhaust every
+    model and every retry on every remaining page - burning the next day's
+    quota on nothing. It has to stop the whole run, not just the page.
+    """
+
+
 # Bumped whenever a change to the post-processing would produce different text
 # from the same page: preamble stripping, LaTeX unwrapping, normalisation. The
 # cache records it, and a record from an older version is treated as a miss.
@@ -159,6 +170,10 @@ class VisionOcr:
                 break
             try:
                 return self._read_with(model, b64, deadline)
+            except QuotaExhausted:
+                # Every model draws on the same account allowance, so trying
+                # the next one is guaranteed to fail the same way.
+                raise
             except OcrError as exc:
                 log.warning("ocr.model_exhausted", model=model, reason=str(exc))
                 problems.append(f"{model}: {exc}")
@@ -238,6 +253,14 @@ class VisionOcr:
                     continue
                 return text
 
+            if response.status_code == 429 and _is_daily_quota(response):
+                # Not "slow down" but "come back tomorrow". Retrying costs a
+                # request against a quota that is already at zero.
+                raise QuotaExhausted(
+                    "the provider's daily free-model quota is exhausted; "
+                    "it resets at midnight UTC, or credits raise the limit"
+                )
+
             if response.status_code in (429, 500, 502, 503, 504):
                 log.info(
                     "ocr.retrying",
@@ -268,3 +291,20 @@ class VisionOcr:
 
 def image_sha(image_png: bytes) -> str:
     return hashlib.sha256(image_png).hexdigest()[:16]
+
+
+def _is_daily_quota(response: httpx.Response) -> bool:
+    """Tell a daily allowance apart from an ordinary rate limit.
+
+    OpenRouter says so two ways, and neither is guaranteed to be present, so
+    both are checked: a `limit_source` naming the free tier in the body, and
+    an `X-RateLimit-Remaining` of zero in the forwarded headers.
+    """
+    if response.headers.get("x-ratelimit-remaining") == "0":
+        return True
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    text = str(body)
+    return "free_tier_daily" in text or "free-models-per-day" in text

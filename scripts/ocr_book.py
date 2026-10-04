@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.rag.loaders import document_sha, load_pdf
 from app.rag.normalise import normalise
-from app.rag.ocr import OcrError, PageCache, VisionOcr
+from app.rag.ocr import OcrError, PageCache, QuotaExhausted, VisionOcr
 
 log = get_logger(__name__)
 
@@ -88,6 +88,14 @@ def main() -> int:
         page_started = time.time()
         try:
             text = normalise(ocr.read(page.image_png))
+        except QuotaExhausted as exc:
+            log.error("ocr.quota_exhausted", page=page.number)
+            print()
+            print(f"STOPPED at page {page.number}: {exc}")
+            print("Everything read so far is cached. Re-run after the reset,")
+            print("or add credits to raise the daily limit.")
+            aborted = True
+            break
         except OcrError as exc:
             # Recorded, not raised: the rest of the book is still worth having.
             log.error("ocr.page_failed", page=page.number, reason=str(exc)[:200])
