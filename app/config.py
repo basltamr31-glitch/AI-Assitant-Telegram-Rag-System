@@ -124,6 +124,13 @@ class Settings(BaseSettings):
     # page for 50 of them. A page that cannot be read in five minutes is a
     # page to look at by hand, not one to keep waiting for.
     ocr_page_budget_seconds: int = 300
+    # Stop the whole run after this many pages fail in a row. A per-page budget
+    # bounds one bad page; it does nothing when every page is failing. An
+    # overnight outage once cost 873 minutes - 190 pages, each patiently
+    # exhausting three models and four retries against a network that was
+    # simply gone. Several consecutive total failures is not bad luck, it is a
+    # condition the run cannot fix by continuing.
+    ocr_abort_after_failures: int = 5
     # Per request. Pages measured at 8-13 seconds, so this is ample headroom
     # and still far below the point where a hang costs the whole run.
     ocr_request_timeout_seconds: int = 90

@@ -64,6 +64,8 @@ def main() -> int:
 
     read = cached = failed = skipped = 0
     failures: list[int] = []
+    consecutive = 0
+    aborted = False
     started = time.time()
 
     for page in load_pdf(path, image_max_px=settings.ocr_image_max_px):
@@ -91,7 +93,17 @@ def main() -> int:
             log.error("ocr.page_failed", page=page.number, reason=str(exc)[:200])
             failures.append(page.number)
             failed += 1
+            consecutive += 1
+            if consecutive >= settings.ocr_abort_after_failures:
+                # Not bad luck. Something the run cannot fix by continuing -
+                # the network, the key, the quota - and grinding on costs
+                # hours. Failures are already on disk, so a re-run resumes.
+                log.error("ocr.aborted", consecutive_failures=consecutive)
+                aborted = True
+                break
             continue
+
+        consecutive = 0
 
         cache.put(page.number, doc_sha, text, ",".join(ocr._models))
         read += 1
@@ -104,6 +116,14 @@ def main() -> int:
 
     minutes = (time.time() - started) / 60
     print()
+    if aborted:
+        print(f"STOPPED: {consecutive} pages failed in a row.")
+        print("Something is wrong beyond this book. Check, in order:")
+        print("  - the network: curl https://openrouter.ai/api/v1/models")
+        print("  - OPENROUTER_API_KEY in .env")
+        print("  - whether the models in OCR_MODELS still exist")
+        print("Nothing is lost; re-running resumes from the cache.")
+        print()
     print(f"read from models : {read}")
     print(f"already cached   : {cached}")
     print(f"text from PDF    : {skipped}")
