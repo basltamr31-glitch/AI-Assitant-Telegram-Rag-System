@@ -33,8 +33,15 @@ class FakeLLM:
     failure.
     """
 
-    def __init__(self, text: str = "A plain answer.", fails: bool = False) -> None:
+    def __init__(
+        self,
+        text: str = "A plain answer.",
+        fails: bool = False,
+        replies: list[str] | None = None,
+    ) -> None:
         self.text = text
+        # One reply per call, in order, for tests of what happens on a retry.
+        self.replies = list(replies or [])
         self.fails = fails
         self.calls: list[str] = []
         self.systems: list[str] = []
@@ -47,7 +54,7 @@ class FakeLLM:
         from app.llm.client import LLMResult
 
         return LLMResult(
-            text=self.text,
+            text=self.replies.pop(0) if self.replies else self.text,
             model="claude-opus-5",
             input_tokens=10,
             output_tokens=5,
@@ -424,3 +431,50 @@ def test_an_answer_citing_nothing_appends_nothing(grounded_client: TestClient) -
     reply = post(grounded_client, text="سؤال").json()["reply"]
 
     assert "المصادر" not in reply
+
+
+# --- language drift ------------------------------------------------------------
+
+ARTICLE_20 = "يطبق القانون السوري على كل سوري ارتكب جناية خارج سوريا [1]."
+DRIFT = ARTICLE_20 + "即使以后失去或取得 Syrian 国籍也不影响此规定。"
+
+
+def test_a_reply_that_drifts_language_is_asked_again(
+    grounded_client: TestClient,
+) -> None:
+    """The real failure: a closing sentence in Chinese about Article 20."""
+    fake = FakeLLM(replies=[DRIFT, ARTICLE_20])
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever(["المادة 20"])
+
+    reply = post(grounded_client, text="سوري ارتكب جريمة خارج سوريا").json()["reply"]
+
+    assert len(fake.calls) == 2
+    assert "国" not in reply
+    assert ARTICLE_20 in reply
+
+
+def test_a_second_drift_loses_the_sentence_not_the_answer(
+    grounded_client: TestClient,
+) -> None:
+    fake = FakeLLM(replies=[DRIFT, DRIFT])
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever(["المادة 20"])
+
+    body = post(grounded_client, text="سوري ارتكب جريمة خارج سوريا").json()
+
+    assert len(fake.calls) == 2
+    assert "国" not in body["reply"]
+    assert ARTICLE_20 in body["reply"]
+    # The citation survived, so the source list did too.
+    assert body["sources"] == ["source.pdf, p.1"]
+
+
+def test_a_clean_reply_is_not_asked_twice(grounded_client: TestClient) -> None:
+    fake = FakeLLM(text=ARTICLE_20)
+    grounded_client.app.state.llm = fake
+    grounded_client.app.state.retriever = FakeRetriever(["المادة 20"])
+
+    post(grounded_client, text="سؤال")
+
+    assert len(fake.calls) == 1

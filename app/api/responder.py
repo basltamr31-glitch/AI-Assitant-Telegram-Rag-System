@@ -29,6 +29,8 @@ rest of the time. So an empty retrieval produces a refusal, not an answer.
 from __future__ import annotations
 
 import html
+from dataclasses import replace
+import re
 from typing import Protocol
 
 from app.api.schemas import ChatRequest
@@ -41,6 +43,7 @@ from app.llm.prompts import (
     SYSTEM_PROMPT,
     build_grounded_prompt,
 )
+from app.rag.quality import foreign_characters
 from app.rag.retrieval import Retrieved
 
 log = get_logger(__name__)
@@ -137,6 +140,40 @@ def _finish(reply: str, handled_by: str, stop_reason: str | None = None) -> tupl
     return cleaned, handled_by
 
 
+# A sentence ends at Western or Arabic punctuation, or at a line break.
+_SENTENCE = re.compile(r"[^.!?؟\n]*(?:[.!?؟]+|\n|$)")
+
+
+def _drop_foreign_sentences(text: str) -> str:
+    """Remove the sentences written in a script this assistant never uses."""
+    return "".join(
+        s for s in _SENTENCE.findall(text) if not foreign_characters(s)
+    ).strip()
+
+
+async def _complete_in_script(llm: LLMProtocol, system: str, text: str) -> LLMResult:
+    """Ask the model, and refuse to pass on an answer that drifted language.
+
+    The free model sometimes switches mid-answer: a closing sentence in
+    Chinese about Article 20, `पूर्व planning` inside an Arabic explanation of
+    homicide. A prompt telling it not to is a suggestion; this is the check.
+    One retry, because the drift is random rather than systematic. If the
+    retry drifts too, the offending sentences are dropped - an answer missing
+    a sentence is still readable, and a sentence in Chinese is not.
+    """
+    result = await llm.complete(system=system, user_message=text)
+    if not foreign_characters(result.text):
+        return result
+
+    log.warning("llm.foreign_script", attempt=1)
+    result = await llm.complete(system=system, user_message=text)
+    if not foreign_characters(result.text):
+        return result
+
+    log.warning("llm.foreign_script", attempt=2, action="dropped_sentences")
+    return replace(result, text=_drop_foreign_sentences(result.text))
+
+
 async def respond(
     request: ChatRequest,
     llm: LLMProtocol | None,
@@ -166,7 +203,7 @@ async def respond(
     # inventing - that is the behaviour this phase exists to remove.
     if not grounded:
         try:
-            result = await llm.complete(system=SYSTEM_PROMPT, user_message=text)
+            result = await _complete_in_script(llm, SYSTEM_PROMPT, text)
         except Exception:
             log.exception("llm.call_failed")
             return MODEL_FAILED, "model.error", []
@@ -195,7 +232,7 @@ async def respond(
 
     system = build_grounded_prompt(found.as_context())
     try:
-        result = await llm.complete(system=system, user_message=text)
+        result = await _complete_in_script(llm, system, text)
     except Exception:
         # Deliberately broad, deliberately minimal. Retries, timeouts and
         # fallbacks are Phase 13; today the only promise is that a failing
