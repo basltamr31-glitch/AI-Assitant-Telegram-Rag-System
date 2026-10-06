@@ -48,3 +48,20 @@ def test_too_few_pages_to_judge() -> None:
 def test_a_document_without_furniture_is_returned_unchanged() -> None:
     pages = [f"نص الصفحة رقم {i} وهو مختلف تماما عن غيره" for i in range(10)]
     assert strip_boilerplate(pages) == pages
+
+
+FOOTER = "http://parliament.gov.sy/arabic/eindex.php?node=201&print=1"
+
+
+def test_a_footer_with_a_page_counter_is_found() -> None:
+    """`... 45/121` and `... 105/121` are one footer, not 121 distinct lines."""
+    pages = [f"نص الصفحة {i}\n{FOOTER} {i}/20" for i in range(1, 21)]
+    cleaned = strip_boilerplate(pages)
+    assert all(FOOTER not in page for page in cleaned)
+    assert cleaned[4] == "نص الصفحة 5"
+
+
+def test_lines_that_differ_only_by_number_are_content() -> None:
+    """Articles of a law differ by their number; that is not repetition."""
+    pages = [f"نص المادة رقم {i} من هذا القانون وتفاصيلها" for i in range(1, 21)]
+    assert find_boilerplate(pages) == set()

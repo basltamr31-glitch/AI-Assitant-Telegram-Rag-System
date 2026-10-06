@@ -26,11 +26,27 @@ would quietly delete structure.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
+
+# A footer usually carries the page number, which makes every copy of it
+# unique: `...&print=1 45/121` and `...&print=1 105/121` are the same furniture
+# and never match as strings. Masking that page counter before counting
+# catches them; the original line is what gets removed.
+#
+# Only the counter, and only at the end of the line. Masking every digit would
+# make `نص المادة رقم 7` and `نص المادة رقم 8` the same line, and a law whose
+# articles differ only by number would lose them all as "furniture".
+_PAGE_COUNTER = re.compile(r"[0-9٠-٩]+\s*/\s*[0-9٠-٩]+\s*$")
+
+
+def _fingerprint(line: str) -> str:
+    return _PAGE_COUNTER.sub("#/#", line.strip())
+
 
 # Below this, a repeated line is more likely to be structure than furniture.
 MIN_LENGTH = 25
@@ -57,7 +73,7 @@ def find_boilerplate(
         # Per page, not per occurrence: a line printed twice on one page is
         # still only evidence from one page.
         seen = {
-            line.strip()
+            _fingerprint(line)
             for line in page.split("\n")
             if len(line.strip()) >= min_length
         }
@@ -90,7 +106,7 @@ def strip_boilerplate(
         kept = [
             line
             for line in page.split("\n")
-            if line.strip() not in furniture
+            if _fingerprint(line) not in furniture
         ]
         cleaned.append("\n".join(kept).strip())
     return cleaned

@@ -158,6 +158,29 @@ class VectorStore:
         self._client.upsert(collection_name=self.collection, points=points)
         return len(points)
 
+    def delete_source(self, source: str) -> None:
+        """Remove every chunk belonging to one document.
+
+        Chunk ids are derived from their text, so changing the chunking - or
+        fixing the normalisation, which this project keeps doing - produces
+        new ids. Without this, every re-ingestion would leave the previous
+        version behind as orphans that still match searches and still cite
+        themselves confidently.
+        """
+        self._client.delete(
+            collection_name=self.collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source", match=models.MatchValue(value=source)
+                        )
+                    ]
+                )
+            ),
+        )
+        log.info("store.source_cleared", source=source)
+
     def search(
         self,
         vector: list[float],

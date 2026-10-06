@@ -123,6 +123,10 @@ def main() -> int:
     embedder = LocalEmbedder()
     store = VectorStore()
     store.ensure_collection(embedder.dimension)
+    # Clear this document's previous chunks first: new chunking or new
+    # normalisation means new ids, and the old rows would otherwise stay
+    # and keep matching searches.
+    store.delete_source(source)
 
     print(f"\nembedding {len(chunks)} chunks with {embedder.model_name} ...")
     vectors = embedder.embed_documents([c.text for c in chunks])
