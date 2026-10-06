@@ -88,7 +88,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ chat_id: $json.chat_id, user_id: $json.user_id, first_name: $json.first_name, text: $json.text, message_id: $json.message_id }) }}",
         "options": {
-          "timeout": 30000,
+          "timeout": 120000,
           "response": {
             "response": {
               "responseFormat": "json"
