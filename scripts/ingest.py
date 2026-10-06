@@ -22,7 +22,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.rag.boilerplate import strip_boilerplate
-from app.rag.chunking import Chunk, chunk_page
+from app.rag.chunking import Chunk, chunk_page, join_continuations
 from app.rag.embedder import LocalEmbedder
 from app.rag.normalise import normalise
 from app.rag.store import VectorStore
@@ -56,7 +56,7 @@ def build_chunks(pages: list[dict], source: str, domain: str) -> list[Chunk]:
                 start_index=len(chunks),
             )
         )
-    return chunks
+    return join_continuations(chunks)
 
 
 def main() -> int:

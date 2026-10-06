@@ -9,7 +9,7 @@ exactly why it went unnoticed until the labels were inspected.
 
 from __future__ import annotations
 
-from app.rag.chunking import Chunk, chunk_page
+from app.rag.chunking import Chunk, chunk_page, join_continuations
 
 CURRICULUM_PAGE = (
     "**20.** ليكن $C$ الخط البياني للتابع $f$ المعرف وفق\n"
@@ -119,3 +119,40 @@ def test_every_chunk_can_cite_itself() -> None:
         assert chunk.source == "12-sci-math-1.pdf"
         assert chunk.page == 62
         assert chunk.domain == "curriculum"
+
+
+# --- articles across a page break --------------------------------------------
+
+
+def test_an_article_split_by_a_page_break_is_rejoined() -> None:
+    """`465المادة` at the foot of a page, its body at the head of the next."""
+    first = chunk_page(
+        "464المادة\nنص المادة السابقة.\n465المادة",
+        source="law.pdf", page=74, domain="legal",
+    )
+    second = chunk_page(
+        "يعاقب بالحبس من اقدم على الفعل.\n466المادة\nنص اخر.",
+        source="law.pdf", page=75, domain="legal", start_index=len(first),
+    )
+    chunks = join_continuations(first + second)
+    assert _labels(chunks) == ["المادة 464", "المادة 465", "المادة 466"]
+    assert "يعاقب بالحبس" in chunks[1].text
+    assert chunks[1].page == 74
+    assert [c.index for c in chunks] == [0, 1, 2]
+
+
+def test_the_first_pages_lead_stays_its_own_chunk() -> None:
+    chunks = join_continuations(
+        chunk_page("مقدمة القانون\n1المادة\nنص.", source="law.pdf", page=1, domain="legal")
+    )
+    assert _labels(chunks) == ["", "المادة 1"]
+
+
+def test_curriculum_leads_are_not_merged() -> None:
+    """Above the first exercise is usually a lesson title, not a tail."""
+    first = chunk_page("**1.** تمرين اول.", source="b.pdf", page=1, domain="curriculum")
+    second = chunk_page(
+        "الدرس الثاني: النهايات\n**2.** تمرين ثان.",
+        source="b.pdf", page=2, domain="curriculum",
+    )
+    assert len(join_continuations(first + second)) == 3

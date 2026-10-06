@@ -193,3 +193,36 @@ def chunk_page(
             )
         )
     return chunks
+
+
+def join_continuations(chunks: list[Chunk]) -> list[Chunk]:
+    """Reattach an article's body to its heading when a page break split them.
+
+    Pages are chunked one at a time, so an article that starts at the foot of
+    one page and continues on the next arrives as two chunks: `465المادة` with
+    nothing under it, and a body with no label. The penal code had 52 of the
+    first and 88 of the second. Neither is citable, and the body cannot be
+    found by its article number.
+
+    Text before the first heading on a page is therefore the tail of the
+    previous article, and is moved there. Legal only: in the textbook, the
+    text above the first exercise is usually a lesson title, and merging it
+    into the previous exercise would be wrong. The first page's lead has no
+    article to belong to and is left as it is.
+    """
+    out: list[Chunk] = []
+    for chunk in chunks:
+        previous = out[-1] if out else None
+        if (
+            chunk.domain == "legal"
+            and not chunk.label
+            and previous is not None
+            and previous.label
+            and previous.page < chunk.page
+        ):
+            previous.text = f"{previous.text}\n{chunk.text}"
+            continue
+        out.append(chunk)
+    for i, chunk in enumerate(out):
+        chunk.index = i
+    return out

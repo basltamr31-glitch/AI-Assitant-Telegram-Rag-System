@@ -6,6 +6,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Corpus] — 2026-10-06 — The penal code is in the knowledge base
+
+### Fixed
+- Boilerplate removal now catches a footer whose page counter changes
+  (`... 45/121`). Only that trailing counter is masked: masking every digit
+  made articles that differ only by number look like one repeated line.
+- Articles split by a page break are rejoined (`join_continuations`). Before,
+  the penal code had 52 chunks that were only a heading (`465المادة`) and 88
+  bodies with no article number.
+- Re-ingesting a document deletes its previous chunks first, so a change to
+  the chunking no longer leaves orphans that still match searches.
+
+### Measured
+- `Syria-Penal-Cade-1949-Arabic.pdf`: 754 chunks, one per article plus the
+  cover page; median 227 characters, no unlabeled bodies left.
+- Theft, homicide and jurisdiction questions return the right articles at
+  0.66–0.71. An unrelated question peaks at 0.39 and is refused.
+
+---
+
 ## [Phase 8] — 2026-10-03 — Grounded answers (code complete, awaiting a corpus)
 
 ### Added
