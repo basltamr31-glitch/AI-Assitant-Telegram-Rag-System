@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 11] — 2026-10-08 — The knowledge base over MCP (awaiting review)
+## [Phase 11] — 2026-10-08 — The knowledge base over MCP
 
 **ADR-019** records the choices; ADR-006 why the bot itself does not use MCP.
 

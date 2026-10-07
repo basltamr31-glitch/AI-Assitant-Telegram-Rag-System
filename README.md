@@ -158,6 +158,6 @@ The server finds `.env` by itself, wherever the client starts it from.
 
 ## Project status
 
-Phases 0-10 complete, Phase 11 in progress. Milestones 1 and 2 reached: the
+Phases 0-11 complete. Milestones 1 and 2 reached: the
 bot answers from the Syrian penal code with citations, remembers the
 conversation, and decides for itself when to search. See `ROADMAP.md`.
