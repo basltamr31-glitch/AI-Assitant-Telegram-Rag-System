@@ -17,7 +17,7 @@ is explicitly approved.
 | **7** | Retrieval + CLI test harness | Ask questions from the terminal, see chunks and scores | ✅ |
 | **8** | RAG wired into the chat endpoint | 🏁 **MILESTONE 2** — grounded answers with citations in Telegram | ✅ |
 | **9** | Conversation memory in Postgres; prompt caching | Follow-up questions work; survives a restart | ✅ |
-| **10** | Agent loop + tools; the model decides | Answers "hi" without searching; searches when it should | 🔵 |
+| **10** | Agent loop + tools; the model decides | Answers "hi" without searching; searches when it should | ✅ |
 | **11** | MCP server + client; second client (Claude Desktop) | A real tool call over MCP, end to end | ⬜ |
 | **12** | Auth, validation, prompt injection, rate limits, secret-safe logging | A written threat model with mitigations | ⬜ |
 | **13** | Retries, timeouts, fallbacks, structured errors, tracing | Kill Qdrant mid-conversation — the bot degrades gracefully | ⬜ |

@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 10] — 2026-10-07 — The agent decides when to search (awaiting review)
+## [Phase 10] — 2026-10-07 — The agent decides when to search
 
 **ADR-018** records the design and the four rules.
 
