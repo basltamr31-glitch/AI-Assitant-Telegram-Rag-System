@@ -46,6 +46,21 @@ def foreign_characters(text: str) -> list[str]:
     return _FOREIGN_SCRIPT.findall(text)
 
 
+# A sentence ends at Western or Arabic punctuation, or at a line break.
+_SENTENCE = re.compile(r"[^.!?؟\n]*(?:[.!?؟]+|\n|$)")
+
+
+def drop_foreign_sentences(text: str) -> str:
+    """Remove the sentences written in a script this assistant never uses.
+
+    For model replies, not OCR: a reply with one Chinese sentence in it is
+    still worth sending without that sentence (see `responder.py`).
+    """
+    return "".join(
+        s for s in _SENTENCE.findall(text) if not foreign_characters(s)
+    ).strip()
+
+
 def arabic_ratio(text: str) -> float:
     """Share of letter-ish characters that are Arabic."""
     letters = [c for c in text if c.isalpha()]

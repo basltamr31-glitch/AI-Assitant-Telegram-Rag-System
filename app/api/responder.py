@@ -34,6 +34,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Protocol
 
+from app.agent.loop import run_agent
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import markdown_emphasis, sanitise, truncate
 from app.core.logging import get_logger
@@ -44,7 +45,7 @@ from app.llm.prompts import (
     SYSTEM_PROMPT,
     build_grounded_prompt,
 )
-from app.rag.quality import foreign_characters
+from app.rag.quality import drop_foreign_sentences, foreign_characters
 from app.rag.retrieval import Retrieved
 
 log = get_logger(__name__)
@@ -179,17 +180,6 @@ def _visible_answer(result: LLMResult) -> str:
     return result.text
 
 
-# A sentence ends at Western or Arabic punctuation, or at a line break.
-_SENTENCE = re.compile(r"[^.!?؟\n]*(?:[.!?؟]+|\n|$)")
-
-
-def _drop_foreign_sentences(text: str) -> str:
-    """Remove the sentences written in a script this assistant never uses."""
-    return "".join(
-        s for s in _SENTENCE.findall(text) if not foreign_characters(s)
-    ).strip()
-
-
 async def _complete_in_script(
     llm: LLMProtocol, system: str, text: str, history: Sequence[Message] = ()
 ) -> LLMResult:
@@ -212,7 +202,7 @@ async def _complete_in_script(
         return result
 
     log.warning("llm.foreign_script", attempt=2, action="dropped_sentences")
-    return replace(result, text=_drop_foreign_sentences(result.text))
+    return replace(result, text=drop_foreign_sentences(result.text))
 
 
 # --- Phase 9: memory ----------------------------------------------------------
@@ -306,6 +296,113 @@ async def _reset(memory: MemoryProtocol | None, chat_id: int) -> tuple[str, str]
     return RESET_DONE, "command.reset"
 
 
+# --- Phase 10: the agent ------------------------------------------------------
+
+_CITED = re.compile(r"\[(\d+)\]")
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _articles_named(answer: str, passages: list) -> list[int]:
+    """Passages the answer cites by article number rather than by `[n]`.
+
+    The model sometimes writes "المادة 628/ب تقضي..." with no `[n]` at all,
+    and the reader got no sources. An article named in the answer *and*
+    present in the retrieved passages is a citation that can be checked, so
+    it is listed. The number has to follow the word مادة - a bare "628"
+    could be a sum of money - and only retrieved passages qualify, so a
+    number the model remembered from elsewhere is never given a source.
+    """
+    plain = _TAG.sub("", answer).translate(_ARABIC_DIGITS)
+    named = []
+    for i, passage in enumerate(passages, start=1):
+        number = passage.label.removeprefix("المادة ").strip()
+        if number.isdigit() and re.search(rf"ماد[ةت]\D{{0,15}}(?<!\d){number}(?!\d)", plain):
+            named.append(i)
+    return named
+
+
+async def _respond_with_agent(
+    request: ChatRequest,
+    llm,
+    retriever,
+    text: str,
+    history: list[Message],
+    memory: MemoryProtocol | None,
+    max_rounds: int,
+) -> tuple[str, str, list[str]]:
+    """Let the model decide whether to look; enforce what it found.
+
+    Two rules live here rather than in the loop, because they are about what
+    reaches the user. Nothing found is a refusal, as in Phase 8 - the model's
+    text is discarded, however plausible. And a citation must point at a
+    passage that was actually retrieved: `[7]` when four passages came back
+    is removed, not shown as if it could be checked.
+    """
+    try:
+        outcome = await run_agent(
+            llm,
+            retriever,
+            text,
+            history,
+            previous_question=_previous_question(history),
+            max_rounds=max_rounds,
+        )
+    except Exception:
+        log.exception("agent.failed")
+        return MODEL_FAILED, "model.error", []
+
+    result, evidence = outcome.result, outcome.evidence
+
+    if evidence.searched and not evidence.passages:
+        log.info("agent.nothing_found", rounds=outcome.rounds)
+        await _remember(memory, request, text, REMEMBERED_REFUSAL)
+        return NOTHING_FOUND, "agent.nothing_found", []
+
+    if not evidence.searched:
+        reply, handled_by = _finish(_visible_answer(result), "agent.direct", result.stop_reason)
+        if handled_by == "agent.direct":
+            await _remember(memory, request, text, result.text)
+        return reply, handled_by, []
+
+    citations = evidence.citations()
+    invalid: list[str] = []
+
+    def keep_if_real(match: re.Match[str]) -> str:
+        if 1 <= int(match.group(1)) <= len(citations):
+            return match.group(0)
+        invalid.append(match.group(0))
+        return ""
+
+    answer = _CITED.sub(keep_if_real, result.text)
+    if invalid:
+        log.warning("agent.invalid_citations", citations=invalid)
+    cited = sorted({int(n) for n in _CITED.findall(answer)})
+    if not cited:
+        cited = _articles_named(answer, evidence.passages)
+        if cited:
+            log.info("agent.citations_by_article_number", cited=len(cited))
+    sources = [citations[n - 1] for n in cited]
+
+    body = _visible_answer(replace(result, text=answer))
+    if sources:
+        body += "\n\n<i>المصادر:</i>\n" + "\n".join(
+            f"[{n}] {citations[n - 1]}" for n in cited
+        )
+    reply, handled_by = _finish(body, "agent.grounded", result.stop_reason)
+    if handled_by != "agent.grounded":
+        return reply, handled_by, []
+    await _remember(memory, request, text, answer)
+    log.info(
+        "chat.agent_reply",
+        rounds=outcome.rounds,
+        passages=len(evidence.passages),
+        cited=len(sources),
+        forced_search=outcome.forced_search,
+    )
+    return reply, handled_by, sources
+
+
 async def respond(
     request: ChatRequest,
     llm: LLMProtocol | None,
@@ -315,6 +412,8 @@ async def respond(
     memory: MemoryProtocol | None = None,
     history_limit: int = 8,
     history_chars: int = 6000,
+    agent: bool = False,
+    agent_max_rounds: int = 3,
 ) -> tuple[str, str, list[str]]:
     """Return `(reply_html, handled_by, citations)` for one message.
 
@@ -361,6 +460,14 @@ async def respond(
     if retriever is None:
         log.warning("retrieval.unavailable")
         return KNOWLEDGE_BASE_UNAVAILABLE, "retrieval.unavailable", []
+
+    # Phase 10, where the provider can call tools. Ollama and Anthropic
+    # cannot yet (ADR-018), and keep the Phase 8 pipeline below - which is
+    # also what AGENT_ENABLED=false brings back.
+    if agent and hasattr(llm, "complete_with_tools"):
+        return await _respond_with_agent(
+            request, llm, retriever, text, history, memory, agent_max_rounds
+        )
 
     try:
         found = retriever.retrieve(text, context=_previous_question(history))

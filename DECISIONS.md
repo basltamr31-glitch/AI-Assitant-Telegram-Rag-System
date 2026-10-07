@@ -183,6 +183,53 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-018 — The agent: the model picks the tool, the code keeps the rules
+
+**Date:** 2026-10-07 · **Status:** Accepted (completes ADR-005's sequence)
+
+**Context.** Phase 8 searched on every message, so "مرحبا" was searched for
+and refused - the cost ADR-005 accepted for a baseline. Phase 10 hands the
+decision to the model.
+
+### Decision 1 — Two tools, chosen by the model
+
+`search_knowledge_base(query)` and `get_article(number)`. The second exists
+because "what does Article 535 say?" has one right answer and a vector search
+returns 533 and 534 almost as confidently; an exact lookup by label cannot.
+The model also writes its own search query, which resolves a follow-up the way
+ADR-017 Decision 2 rejected doing with a separate rewriting call - here it
+costs nothing extra.
+
+Measured live: "مرحبا" answered directly with no search; "ما نص المادة 535؟"
+called `get_article`; "وإذا كان السارق مسلحاً؟" searched for theft with a
+weapon, saw Article 316 referred to, and fetched it - two rounds, unprompted.
+
+### Decision 2 — Four rules the model cannot override
+
+`ARCHITECTURE.md`: the model chooses which tool, never which rule.
+
+1. **At most three rounds of tools**, then an answer with what it has.
+2. **No substantive answer without a search.** A direct reply must be short
+   and contain no digits; otherwise it is discarded, the code searches, and
+   the model answers from that. A heuristic: Phase 14 measures its misfires.
+3. **Nothing found is a refusal**, whatever the model wrote - as in Phase 8.
+4. **A citation must point at a retrieved passage.** `[7]` when four came
+   back is removed. An answer that names an article ("المادة 628") without
+   `[n]` gets that article listed as a source - only if it was retrieved.
+
+### Decision 3 — OpenRouter only, for now
+
+Tool calling is implemented for OpenRouter, which is what runs. Anthropic and
+Ollama keep the Phase 8 pipeline (the responder checks for
+`complete_with_tools`), as does `AGENT_ENABLED=false`. Implementing three wire
+formats when one is in use and testable would be two-thirds untested code.
+
+**Tradeoffs.** A searched answer is two model calls instead of one: twice the
+latency and twice the free-tier quota. A greeting is one call instead of a
+search and a refusal.
+
+---
+
 ## ADR-017 — Conversation memory: recent turns from Postgres, and follow-ups searched with their context
 
 **Date:** 2026-10-07 · **Status:** Accepted

@@ -98,8 +98,54 @@ _BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
 _ITALIC = re.compile(r"(?<![^\s(])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![^\s.,:;!?؟،)])")
 
 
+# Quoting an article, the model writes Markdown's `> ` - and Telegram showed
+# `&gt;` in front of every line of Article 535. A run of such lines becomes
+# one <blockquote>, which Telegram renders as a quote.
+_QUOTE_LINE = re.compile(r"^>\s?(.*)$")
+
+
+def _blockquotes(text: str) -> str:
+    out: list[str] = []
+    quote: list[str] = []
+    for line in text.split("\n") + [""]:
+        match = _QUOTE_LINE.match(line)
+        if match:
+            quote.append(match.group(1))
+            continue
+        if quote:
+            out.append("<blockquote>" + "\n".join(quote).strip() + "</blockquote>")
+            quote = []
+        out.append(line)
+    return "\n".join(out[:-1])
+
+
+# Telegram has no tables. A model comparing three articles writes one anyway,
+# and the reader got rows of pipes. Each row becomes one line - the header in
+# bold - and the `|---|` separator row and `---` rules disappear.
+_TABLE_ROW = re.compile(r"^\s*\|(.*)\|\s*$")
+_TABLE_SEPARATOR = re.compile(r"^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$")
+
+
+def _flatten_tables(text: str) -> str:
+    out: list[str] = []
+    header_done = False
+    for line in text.split("\n"):
+        if _TABLE_SEPARATOR.match(line):
+            continue
+        row = _TABLE_ROW.match(line)
+        if not row:
+            header_done = False
+            out.append(line)
+            continue
+        cells = " — ".join(c.strip() for c in row.group(1).split("|") if c.strip())
+        out.append(cells if header_done else f"<b>{cells}</b>")
+        header_done = True
+    return "\n".join(out)
+
+
 def markdown_emphasis(text: str) -> str:
-    """Turn Markdown bold and italic into the HTML tags Telegram renders."""
+    """Turn Markdown quotes, tables, bold and italic into what Telegram renders."""
+    text = _flatten_tables(_blockquotes(text))
     return _ITALIC.sub(r"<i>\1</i>", _BOLD.sub(r"<b>\1</b>", text))
 
 

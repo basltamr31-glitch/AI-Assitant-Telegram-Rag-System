@@ -222,6 +222,40 @@ class VectorStore:
             for hit in hits
         ]
 
+    def by_label(self, label: str, *, domain: str | None = None) -> list[SearchResult]:
+        """Every chunk with exactly this label, e.g. `المادة 535`.
+
+        An exact lookup, not a search: "what does Article 535 say?" has one
+        right answer, and a vector search for it returns whichever articles
+        happen to *sound* like 535 - 533 and 534 score almost as well. No
+        score applies, so 1.0 stands for "this is the passage asked for".
+
+        `label` has no payload index, so this scans. At a few thousand
+        chunks that is milliseconds; the day it is not, index it.
+        """
+        conditions = [models.FieldCondition(key="label", match=models.MatchValue(value=label))]
+        if domain:
+            conditions.append(
+                models.FieldCondition(key="domain", match=models.MatchValue(value=domain))
+            )
+        points, _ = self._client.scroll(
+            collection_name=self.collection,
+            scroll_filter=models.Filter(must=conditions),
+            limit=10,
+            with_payload=True,
+        )
+        return [
+            SearchResult(
+                text=p.payload.get("text", ""),
+                score=1.0,
+                source=p.payload.get("source", ""),
+                page=p.payload.get("page", 0),
+                domain=p.payload.get("domain", ""),
+                label=p.payload.get("label", ""),
+            )
+            for p in points
+        ]
+
     def count(self, domain: str | None = None) -> int:
         """How many chunks are stored, optionally for one domain."""
         flt = None

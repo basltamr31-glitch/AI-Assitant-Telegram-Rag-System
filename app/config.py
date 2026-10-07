@@ -173,6 +173,15 @@ class Settings(BaseSettings):
     # limit on the answer: more passages crowd out the question.
     retrieval_context_chars: int = 6000
 
+    # --- Agent (Phase 10) ------------------------------------------------------
+    # True lets the model decide when to search; false brings back Phase 8's
+    # search-on-every-message pipeline. Only providers that can call tools
+    # use the agent (ADR-018); the others always get the pipeline.
+    agent_enabled: bool = True
+    # Rounds of tool calls before the model must answer with what it has.
+    # Each round is one model request - one of fifty a day on the free tier.
+    agent_max_rounds: int = 3
+
     # --- Conversation memory (Phase 9) ----------------------------------------
     # False makes every message stand alone again, as before Phase 9.
     memory_enabled: bool = True

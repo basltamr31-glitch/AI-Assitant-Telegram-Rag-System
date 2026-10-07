@@ -39,7 +39,7 @@ from app.llm.client import create_llm_client
 from app.memory.store import ConversationStore
 from app.rag.retrieval import Retriever
 
-API_VERSION = "0.9.0"
+API_VERSION = "0.10.0"
 
 log = get_logger(__name__)
 
@@ -200,6 +200,8 @@ def create_app() -> FastAPI:
             memory=request.app.state.memory,
             history_limit=settings.memory_messages,
             history_chars=settings.memory_max_chars,
+            agent=settings.agent_enabled,
+            agent_max_rounds=settings.agent_max_rounds,
         )
 
         log.info(

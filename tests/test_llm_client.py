@@ -171,6 +171,10 @@ def _openrouter_answering(
     from app.config import get_settings
     from app.llm.openrouter_client import OpenRouterClient
 
+    import app.llm.openrouter_client as module
+
+    # The real pause before a retry is seconds; a test has no overload to wait out.
+    monkeypatch.setattr(module, "_RETRY_DELAY_S", 0)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-a-real-key")
     get_settings.cache_clear()
     try:

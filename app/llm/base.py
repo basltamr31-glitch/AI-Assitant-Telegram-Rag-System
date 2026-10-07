@@ -52,6 +52,40 @@ class Message:
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    """A tool the model may call: what it is for, and what it takes.
+
+    The description is the only thing the model knows about a tool, so it is
+    written for the model - when to use it, and when not to.
+    """
+
+    name: str
+    description: str
+    parameters: dict  # JSON Schema for the arguments
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """The model asking for one tool to be run."""
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass(frozen=True)
+class ToolStep:
+    """One round of the agent loop: what the model asked for, what it got.
+
+    `results` lines up with `calls`, one string per call. Providers replay
+    these as their own message types; the agent never sees those.
+    """
+
+    calls: tuple[ToolCall, ...]
+    results: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LLMResult:
     """One completion, plus what it cost to produce."""
 
@@ -68,6 +102,9 @@ class LLMResult:
     # not per-token, and pretending otherwise would put a fake number in the
     # logs we plan to compare against in Phase 14.
     local: bool = False
+    # Phase 10: the tools the model wants run before it answers. Empty means
+    # `text` is the answer.
+    tool_calls: tuple[ToolCall, ...] = ()
 
     @property
     def cost_usd(self) -> float:

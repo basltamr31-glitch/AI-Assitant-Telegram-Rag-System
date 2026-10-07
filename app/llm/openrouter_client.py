@@ -23,15 +23,26 @@ worse than no table, because it looks authoritative.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import Sequence
 
 import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.llm.base import LLMResult, Message, strip_thinking
+from app.llm.base import (
+    LLMResult,
+    Message,
+    ToolCall,
+    ToolSpec,
+    ToolStep,
+    strip_thinking,
+)
 
 log = get_logger(__name__)
+
+_RETRY_DELAY_S = 3.0
 
 
 class OpenRouterClient:
@@ -70,17 +81,94 @@ class OpenRouterClient:
         max_tokens: int = 4096,
         history: Sequence[Message] = (),
     ) -> LLMResult:
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system},
-                *(m.as_dict() for m in history),
-                {"role": "user", "content": user_message},
+        messages = [
+            {"role": "system", "content": system},
+            *(m.as_dict() for m in history),
+            {"role": "user", "content": user_message},
+        ]
+        return await self._chat(messages, max_tokens)
+
+    async def complete_with_tools(
+        self,
+        system: str,
+        user_message: str,
+        *,
+        tools: Sequence[ToolSpec],
+        steps: Sequence[ToolStep] = (),
+        history: Sequence[Message] = (),
+        allow_tools: bool = True,
+        max_tokens: int = 4096,
+    ) -> LLMResult:
+        """One turn of the agent loop, in OpenAI's tool-calling format.
+
+        `steps` are the rounds already run this turn: each becomes an
+        assistant message carrying its tool calls, then one `tool` message
+        per result. `allow_tools=False` still sends the tool definitions -
+        a transcript that mentions tools is rejected without them - but
+        tells the model it must answer now.
+        """
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            *(m.as_dict() for m in history),
+            {"role": "user", "content": user_message},
+        ]
+        for step in steps:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": json.dumps(call.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for call in step.calls
+                    ],
+                }
+            )
+            messages.extend(
+                {"role": "tool", "tool_call_id": call.id, "content": result}
+                for call, result in zip(step.calls, step.results)
+            )
+        return await self._chat(
+            messages,
+            max_tokens,
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
             ],
+            tool_choice="auto" if allow_tools else "none",
+        )
+
+    async def _chat(
+        self,
+        messages: list[dict],
+        max_tokens: int,
+        *,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
+    ) -> LLMResult:
+        payload: dict = {
+            "model": self._model,
+            "messages": messages,
             "max_tokens": max_tokens,
             # Ask for the real cost of this call rather than guessing it.
             "usage": {"include": True},
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice or "auto"
         if self._reasoning_effort:
             # How long a reasoning model thinks before answering. Nemotron 3
             # Ultra at its default took two minutes on a follow-up with
@@ -109,11 +197,17 @@ class OpenRouterClient:
             log.warning(
                 "llm.openrouter_no_choices", attempt=attempt, body=response.text[:400]
             )
+            if attempt == 1:
+                # Usually "Upstream error from Nvidia: Service temporarily
+                # overloaded". Retrying one second later met the same
+                # overload; a few seconds gives it a chance to clear.
+                await asyncio.sleep(_RETRY_DELAY_S)
         else:
             raise RuntimeError("OpenRouter returned no choices, twice")
 
         choice = data["choices"][0]
-        text = strip_thinking(choice["message"].get("content") or "")
+        message = choice["message"]
+        text = strip_thinking(message.get("content") or "")
         usage = data.get("usage") or {}
 
         result = LLMResult(
@@ -127,6 +221,7 @@ class OpenRouterClient:
             # Reported cost wins over any local table; `local` stays False so
             # a free model still records a real, measured zero.
             reported_cost_usd=usage.get("cost"),
+            tool_calls=tuple(_parse_tool_call(c) for c in message.get("tool_calls") or ()),
         )
         log.info(
             "llm.completion",
@@ -136,5 +231,26 @@ class OpenRouterClient:
             output_tokens=result.output_tokens,
             cost_usd=result.cost_usd,
             stop_reason=result.stop_reason,
+            tool_calls=[c.name for c in result.tool_calls],
         )
         return result
+
+
+def _parse_tool_call(raw: dict) -> ToolCall:
+    """OpenAI sends arguments as a JSON *string*, which a model can get wrong.
+
+    Malformed arguments become an empty dict rather than an exception: the
+    tool then reports what is missing, and the model gets a chance to fix it,
+    which is better than the whole message failing over a stray quote.
+    """
+    function = raw.get("function") or {}
+    try:
+        arguments = json.loads(function.get("arguments") or "{}")
+    except json.JSONDecodeError:
+        log.warning("llm.bad_tool_arguments", raw=str(function.get("arguments"))[:200])
+        arguments = {}
+    return ToolCall(
+        id=raw.get("id", ""),
+        name=function.get("name", ""),
+        arguments=arguments if isinstance(arguments, dict) else {},
+    )

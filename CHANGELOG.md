@@ -6,6 +6,36 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 10] — 2026-10-07 — The agent decides when to search (awaiting review)
+
+**ADR-018** records the design and the four rules.
+
+### Added
+- `app/agent/` — the loop and two tools, `search_knowledge_base` and
+  `get_article` (exact lookup by article number, Arabic digits included).
+- `Evidence`: every passage retrieved in a turn, numbered once, so `[n]`
+  means the same thing across several tool calls.
+- `OpenRouterClient.complete_with_tools()`, in OpenAI's tool-calling format.
+- `AGENT_ENABLED` (true), `AGENT_MAX_ROUNDS` (3).
+- 20 tests: each rule against a scripted model, and the wire format.
+
+### Changed
+- The grounding rules are one constant shared by the Phase 8 prompt and the
+  agent's.
+- Markdown quotes become `<blockquote>`, tables become one line per row, and
+  `---` rules disappear: Telegram renders none of them.
+- An OpenRouter reply with no `choices` is retried after 3 s, not at once:
+  the cause was "Service temporarily overloaded", and one second later it
+  still was.
+- `API_VERSION` is `0.10.0`.
+
+### Verified live
+- "مرحبا" → answered, no search. "ما نص المادة 535؟" → `get_article`.
+  A theft question → one search, five articles cited. Its follow-up → a
+  search, then `get_article` for an article the results referred to.
+
+---
+
 ## [Phase 9] — 2026-10-07 — Conversation memory
 
 **ADR-017** records the design and what was measured.

@@ -84,3 +84,39 @@ def test_multiplication_is_not_mistaken_for_italic() -> None:
 
 def test_converted_emphasis_survives_sanitising() -> None:
     assert sanitise(markdown_emphasis("**عقوبة** السرقة")) == "<b>عقوبة</b> السرقة"
+
+
+def test_markdown_quote_lines_become_one_blockquote() -> None:
+    """Article 535 arrived with `&gt;` in front of every line."""
+    text = "المادة 535:\n\n> يعاقب بالاعدام على القتل قصدا اذا ارتكب:\n> \n> 1. عمدا.\n\nتعليق."
+    assert markdown_emphasis(text) == (
+        "المادة 535:\n\n<blockquote>يعاقب بالاعدام على القتل قصدا اذا ارتكب:\n\n"
+        "1. عمدا.</blockquote>\n\nتعليق."
+    )
+
+
+def test_a_quote_at_the_end_is_closed() -> None:
+    assert markdown_emphasis("نص\n> اقتباس") == "نص\n<blockquote>اقتباس</blockquote>"
+
+
+def test_a_greater_than_inside_a_line_is_not_a_quote() -> None:
+    assert markdown_emphasis("اذا كان x > 3") == "اذا كان x > 3"
+
+
+def test_a_markdown_table_becomes_one_line_per_row() -> None:
+    """Telegram has no tables; the reader got rows of pipes."""
+    table = (
+        "مقارنة:\n"
+        "| الظرف | المادة | العقوبة |\n"
+        "|-------|--------|---------|\n"
+        "| سلاح فقط | 628 | سنة حبس |\n"
+        "| سلاح وعنف | 624 | 5 سنوات |\n"
+        "\n---\n\nالخلاصة."
+    )
+    assert markdown_emphasis(table) == (
+        "مقارنة:\n"
+        "<b>الظرف — المادة — العقوبة</b>\n"
+        "سلاح فقط — 628 — سنة حبس\n"
+        "سلاح وعنف — 624 — 5 سنوات\n"
+        "\n\nالخلاصة."
+    )

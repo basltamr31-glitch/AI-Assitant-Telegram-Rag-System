@@ -81,8 +81,23 @@ class Retrieved:
         return [r.citation for r in self.results]
 
 
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
 class Retriever:
     """Embeds a question, searches, and applies the threshold."""
+
+    def article(self, number: str | int) -> Retrieved:
+        """The article with this number, looked up exactly (Phase 10).
+
+        Chunk labels were written with Western digits (`المادة 535`), so an
+        Arabic-Indic `٥٣٥` from the user is translated before the lookup.
+        """
+        digits = str(number).strip().translate(_ARABIC_DIGITS)
+        label = f"المادة {int(digits)}" if digits.isdigit() else ""
+        results = self._store.by_label(label, domain="legal") if label else []
+        log.info("retrieval.article", label=label, returned=len(results))
+        return Retrieved(query=label, results=results, threshold=1.0, rejected=[])
 
     def __init__(
         self,
