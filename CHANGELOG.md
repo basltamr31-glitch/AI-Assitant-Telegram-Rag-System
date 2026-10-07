@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 9] — 2026-10-07 — Conversation memory (awaiting review)
+## [Phase 9] — 2026-10-07 — Conversation memory
 
 **ADR-017** records the design and what was measured.
 
