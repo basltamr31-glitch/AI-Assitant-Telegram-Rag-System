@@ -160,3 +160,57 @@ def test_openrouter_without_a_key_fails_loudly(
             create_llm_client()
     finally:
         get_settings.cache_clear()
+
+
+def _openrouter_answering(
+    monkeypatch: pytest.MonkeyPatch, bodies: list[dict]
+):
+    """An OpenRouterClient whose HTTP calls return `bodies`, one per call."""
+    import httpx
+
+    from app.config import get_settings
+    from app.llm.openrouter_client import OpenRouterClient
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-a-real-key")
+    get_settings.cache_clear()
+    try:
+        client = OpenRouterClient()
+    finally:
+        get_settings.cache_clear()
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json=bodies[len(calls) - 1])
+
+    client._client = httpx.AsyncClient(
+        base_url="https://openrouter.test", transport=httpx.MockTransport(handler)
+    )
+    return client, calls
+
+
+ANSWER = {"choices": [{"message": {"content": "المادة 20"}, "finish_reason": "stop"}]}
+NO_CHOICES = {"error": {"message": "Provider returned error", "code": 502}}
+
+
+def test_a_200_without_choices_is_retried_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real failure: a success status whose body is an error."""
+    import asyncio
+
+    client, calls = _openrouter_answering(monkeypatch, [NO_CHOICES, ANSWER])
+    result = asyncio.run(client.complete(system="s", user_message="q"))
+    assert result.text == "المادة 20"
+    assert len(calls) == 2
+
+
+def test_two_answers_without_choices_fail_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    client, calls = _openrouter_answering(monkeypatch, [NO_CHOICES, NO_CHOICES])
+    with pytest.raises(RuntimeError, match="no choices"):
+        asyncio.run(client.complete(system="s", user_message="q"))
+    assert len(calls) == 2

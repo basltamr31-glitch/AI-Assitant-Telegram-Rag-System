@@ -24,6 +24,7 @@ Neither is trusted just because of where it came from.
 from __future__ import annotations
 
 import html
+import re
 from html.parser import HTMLParser
 
 # Telegram's documented allowlist. `span` is omitted deliberately: it is only
@@ -86,6 +87,20 @@ class _TelegramSanitiser(HTMLParser):
         while self.open_tags:
             self.parts.append(f"</{self.open_tags.pop()}>")
         return "".join(self.parts)
+
+
+# The prompt asks for HTML; the model writes Markdown anyway, and Telegram's
+# HTML mode shows `**المادة 628**` with its asterisks. Only emphasis is
+# translated - it is what the models actually use - and the italic form only
+# where it cannot be multiplication: `*` opening after a space or line start,
+# closing before a space, punctuation or line end, so `$a*b*c$` is left alone.
+_BOLD = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
+_ITALIC = re.compile(r"(?<![^\s(])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![^\s.,:;!?؟،)])")
+
+
+def markdown_emphasis(text: str) -> str:
+    """Turn Markdown bold and italic into the HTML tags Telegram renders."""
+    return _ITALIC.sub(r"<i>\1</i>", _BOLD.sub(r"<b>\1</b>", text))
 
 
 def sanitise(text: str) -> str:

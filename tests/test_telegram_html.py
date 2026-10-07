@@ -7,7 +7,12 @@ entities - so each of these, unhandled, means the user gets silence.
 
 from __future__ import annotations
 
-from app.api.telegram_html import TELEGRAM_MAX_CHARS, sanitise, truncate
+from app.api.telegram_html import (
+    TELEGRAM_MAX_CHARS,
+    markdown_emphasis,
+    sanitise,
+    truncate,
+)
 
 
 def test_allowed_tags_survive() -> None:
@@ -60,3 +65,22 @@ def test_truncation_then_sanitising_leaves_valid_html() -> None:
     """The documented order: cut first, then let the sanitiser close tags."""
     out = sanitise(truncate("<b>" + "word " * 2000))
     assert out.endswith("</b>")
+
+
+def test_markdown_bold_becomes_html() -> None:
+    """The model writes `**...**` even when asked for HTML."""
+    assert markdown_emphasis("- **المادة 628**: الحبس") == "- <b>المادة 628</b>: الحبس"
+
+
+def test_markdown_italic_becomes_html() -> None:
+    assert markdown_emphasis("*ملاحظة: ليست مشورة قانونية.*") == (
+        "<i>ملاحظة: ليست مشورة قانونية.</i>"
+    )
+
+
+def test_multiplication_is_not_mistaken_for_italic() -> None:
+    assert markdown_emphasis("$a*b*c$ و 2*3*4") == "$a*b*c$ و 2*3*4"
+
+
+def test_converted_emphasis_survives_sanitising() -> None:
+    assert sanitise(markdown_emphasis("**عقوبة** السرقة")) == "<b>عقوبة</b> السرقة"

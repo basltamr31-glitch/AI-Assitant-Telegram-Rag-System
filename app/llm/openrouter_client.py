@@ -62,29 +62,40 @@ class OpenRouterClient:
         user_message: str,
         max_tokens: int = 1024,
     ) -> LLMResult:
-        response = await self._client.post(
-            "/chat/completions",
-            json={
-                "model": self._model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user_message},
-                ],
-                "max_tokens": max_tokens,
-                # Ask for the real cost of this call rather than guessing it.
-                "usage": {"include": True},
-            },
-        )
-        if response.status_code >= 400:
-            # OpenRouter puts the useful part in the body; the status alone
-            # does not distinguish "no credit" from "unknown model".
-            log.error(
-                "llm.openrouter_error",
-                status=response.status_code,
-                body=response.text[:400],
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message},
+            ],
+            "max_tokens": max_tokens,
+            # Ask for the real cost of this call rather than guessing it.
+            "usage": {"include": True},
+        }
+        # A 200 is not always an answer. The free upstreams sometimes return a
+        # success status whose body carries an error and no `choices` - six of
+        # the first ten benchmark calls to Nemotron Ultra, and a real Telegram
+        # question on 2026-10-07. It is transient, so it gets exactly one
+        # retry. General retry policy is still Phase 13's.
+        for attempt in (1, 2):
+            response = await self._client.post("/chat/completions", json=payload)
+            if response.status_code >= 400:
+                # OpenRouter puts the useful part in the body; the status alone
+                # does not distinguish "no credit" from "unknown model".
+                log.error(
+                    "llm.openrouter_error",
+                    status=response.status_code,
+                    body=response.text[:400],
+                )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("choices"):
+                break
+            log.warning(
+                "llm.openrouter_no_choices", attempt=attempt, body=response.text[:400]
             )
-        response.raise_for_status()
-        data = response.json()
+        else:
+            raise RuntimeError("OpenRouter returned no choices, twice")
 
         choice = data["choices"][0]
         text = strip_thinking(choice["message"].get("content") or "")

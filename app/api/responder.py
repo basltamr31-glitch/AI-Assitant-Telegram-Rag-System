@@ -34,7 +34,7 @@ import re
 from typing import Protocol
 
 from app.api.schemas import ChatRequest
-from app.api.telegram_html import sanitise, truncate
+from app.api.telegram_html import markdown_emphasis, sanitise, truncate
 from app.core.logging import get_logger
 from app.llm.base import LLMResult
 from app.llm.prompts import (
@@ -133,7 +133,7 @@ def _finish(reply: str, handled_by: str, stop_reason: str | None = None) -> tupl
     open. Telegram rejects an empty `sendMessage`, so an empty completion has
     to become something.
     """
-    cleaned = sanitise(truncate(reply))
+    cleaned = sanitise(truncate(markdown_emphasis(reply)))
     if not cleaned.strip():
         log.warning("llm.empty_reply", stop_reason=stop_reason)
         return "I did not manage to answer that. Try rephrasing?", "model.empty"

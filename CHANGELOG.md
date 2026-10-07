@@ -6,6 +6,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Milestone 2] — 2026-10-07 — Grounded answers in Telegram
+
+Phases 7 and 8 closed. Asked in Telegram about theft, homicide and crimes
+committed abroad, the bot answers in Arabic from the penal code and lists
+the articles it used.
+
+### Changed
+- The model is `nvidia/nemotron-3-ultra-550b-a55b:free`. The free tier of
+  qwen3.8-27b was withdrawn; Nemotron 3 Super mixed French, Spanish and
+  English words into its Arabic. Over ten grounded legal questions Ultra had
+  no drift and cited `[n]` in nine. It takes 6-43 s, so the n8n HTTP node
+  now waits 120 s.
+
+### Fixed
+- A reply in a foreign script (Chinese, Devanagari...) is retried once, then
+  loses the offending sentences rather than reaching the user.
+- An OpenRouter 200 with no `choices` is retried once instead of crashing
+  on `KeyError`.
+- Markdown `**bold**` and `*italic*` become Telegram HTML instead of showing
+  their asterisks.
+
+### Known limits
+- The free tier allows 50 requests a day, shared by the bot and any testing.
+- Latin-script drift is not caught, since Latin letters are legitimate in
+  article names and LaTeX.
+- "حكم الشروع في الجناية" retrieves the misdemeanour articles but not the
+  general rule; the model declined rather than invent. Retrieval tuning is
+  Phase 14.
+
+---
+
 ## [Corpus] — 2026-10-06 — The penal code is in the knowledge base
 
 ### Fixed
