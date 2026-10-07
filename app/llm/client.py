@@ -16,11 +16,13 @@ only start collecting once it hurts has no history to compare against, and
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from anthropic import AsyncAnthropic
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.llm.base import PRICING, LLMResult
+from app.llm.base import PRICING, LLMResult, Message
 
 log = get_logger(__name__)
 
@@ -43,18 +45,21 @@ class AnthropicClient:
         system: str,
         user_message: str,
         max_tokens: int = 1024,
+        history: Sequence[Message] = (),
     ) -> LLMResult:
-        """Send one stateless message and return the reply.
+        """Send a message, after the earlier turns of the conversation.
 
-        Stateless on purpose: there is no conversation history yet. Phase 9
-        adds it, and this signature grows a `messages` parameter then. Until
-        the storage exists, pretending to remember would be a lie.
+        `history` is oldest first and must start with a user turn - the
+        Messages API rejects anything else, and `responder.py` guarantees it.
         """
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
             system=system,
-            messages=[{"role": "user", "content": user_message}],
+            messages=[
+                *(m.as_dict() for m in history),
+                {"role": "user", "content": user_message},
+            ],
         )
 
         text = "".join(

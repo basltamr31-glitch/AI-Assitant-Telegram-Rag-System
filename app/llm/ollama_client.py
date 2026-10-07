@@ -20,11 +20,13 @@ number on that gap rather than leaving it a feeling.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.llm.base import LLMResult, strip_thinking
+from app.llm.base import LLMResult, Message, strip_thinking
 
 log = get_logger(__name__)
 
@@ -49,6 +51,7 @@ class OllamaClient:
         system: str,
         user_message: str,
         max_tokens: int = 512,
+        history: Sequence[Message] = (),
     ) -> LLMResult:
         response = await self._client.post(
             "/api/chat",
@@ -56,6 +59,7 @@ class OllamaClient:
                 "model": self._model,
                 "messages": [
                     {"role": "system", "content": system},
+                    *(m.as_dict() for m in history),
                     {"role": "user", "content": user_message},
                 ],
                 "stream": False,

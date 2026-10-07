@@ -36,9 +36,10 @@ from app.api.security import require_allowed_user, require_api_key
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.llm.client import create_llm_client
+from app.memory.store import ConversationStore
 from app.rag.retrieval import Retriever
 
-API_VERSION = "0.8.0"
+API_VERSION = "0.9.0"
 
 log = get_logger(__name__)
 
@@ -101,9 +102,25 @@ def create_app() -> FastAPI:
     else:
         log.warning("retrieval.disabled", reason="RETRIEVAL_ENABLED is false")
 
+    # Unlike the retriever, this one is checked at startup: creating the
+    # table is the check, and it is one quick query. A Postgres that is down
+    # leaves the service answering every message as a fresh question.
+    memory = None
+    if settings.memory_enabled:
+        try:
+            memory = ConversationStore(settings.postgres_dsn)
+            memory.ensure_schema()
+            log.info("memory.ready", messages=settings.memory_messages)
+        except Exception as exc:  # noqa: BLE001
+            memory = None
+            log.error("memory.unavailable", reason=str(exc))
+    else:
+        log.warning("memory.disabled", reason="MEMORY_ENABLED is false")
+
     app.state.llm = llm
     app.state.retriever = retriever
     app.state.grounded = settings.retrieval_enabled
+    app.state.memory = memory
 
     @app.middleware("http")
     async def trace_and_log(request: Request, call_next):
@@ -155,6 +172,11 @@ def create_app() -> FastAPI:
                 if app.state.retriever is not None
                 else ("disabled" if not app.state.grounded else "unavailable")
             ),
+            memory=(
+                "ready"
+                if app.state.memory is not None
+                else ("disabled" if not settings.memory_enabled else "unavailable")
+            ),
         )
 
     @app.post(
@@ -175,6 +197,9 @@ def create_app() -> FastAPI:
             request.app.state.llm,
             request.app.state.retriever,
             grounded=request.app.state.grounded,
+            memory=request.app.state.memory,
+            history_limit=settings.memory_messages,
+            history_chars=settings.memory_max_chars,
         )
 
         log.info(

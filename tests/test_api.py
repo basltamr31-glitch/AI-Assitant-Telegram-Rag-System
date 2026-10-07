@@ -45,9 +45,13 @@ class FakeLLM:
         self.fails = fails
         self.calls: list[str] = []
         self.systems: list[str] = []
+        self.histories: list[list] = []
 
-    async def complete(self, system: str, user_message: str, max_tokens: int = 1024):
+    async def complete(
+        self, system: str, user_message: str, max_tokens: int = 1024, history=()
+    ):
         self.calls.append(user_message)
+        self.histories.append(list(history))
         self.systems.append(system)
         if self.fails:
             raise RuntimeError("upstream is down")
@@ -80,6 +84,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # retriever - mixing the two would mean every assertion about a reply
     # depended on a search result as well.
     monkeypatch.setenv("RETRIEVAL_ENABLED", "false")
+    # Memory off here too: these tests must never write to a real Postgres.
+    monkeypatch.setenv("MEMORY_ENABLED", "false")
     # Settings are cached with lru_cache, so the patched environment only
     # takes effect once the cache is dropped - before *and* after, so this
     # test's values never leak into the next one.
@@ -308,9 +314,11 @@ class FakeRetriever:
         self.passages = passages or []
         self.fails = fails
         self.queries: list[str] = []
+        self.contexts: list[str | None] = []
 
     def retrieve(self, query: str, **kwargs):
         self.queries.append(query)
+        self.contexts.append(kwargs.get("context"))
         if self.fails:
             raise RuntimeError("qdrant is down")
         return FakeRetrieved(self.passages)
@@ -323,6 +331,7 @@ def grounded_client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("RETRIEVAL_ENABLED", "true")
+    monkeypatch.setenv("MEMORY_ENABLED", "false")
     get_settings.cache_clear()
 
     from app.api.main import create_app
@@ -478,3 +487,169 @@ def test_a_clean_reply_is_not_asked_twice(grounded_client: TestClient) -> None:
     post(grounded_client, text="سؤال")
 
     assert len(fake.calls) == 1
+
+
+# --- Phase 9: conversation memory -----------------------------------------------
+
+
+class FakeMemory:
+    """An in-memory stand-in for ConversationStore."""
+
+    def __init__(self, fails: bool = False) -> None:
+        self.rows: dict[int, list] = {}
+        self.fails = fails
+
+    async def recent(self, chat_id: int, limit: int):
+        if self.fails:
+            raise RuntimeError("postgres is down")
+        return self.rows.get(chat_id, [])[-limit:]
+
+    async def append(self, chat_id: int, user_id: int, turns) -> None:
+        if self.fails:
+            raise RuntimeError("postgres is down")
+        self.rows.setdefault(chat_id, []).extend(turns)
+
+    async def clear(self, chat_id: int) -> int:
+        return len(self.rows.pop(chat_id, []))
+
+
+THEFT = "ما عقوبة السرقة؟"
+ARMED = "وإذا كان السارق مسلحاً؟"
+
+
+def _with_memory(client: TestClient, llm: FakeLLM, memory: FakeMemory | None = None):
+    memory = memory or FakeMemory()
+    client.app.state.llm = llm
+    client.app.state.memory = memory
+    retriever = FakeRetriever(["المادة 628"])
+    client.app.state.retriever = retriever
+    return memory, retriever
+
+
+def test_a_follow_up_reaches_the_model_with_the_earlier_exchange(
+    grounded_client: TestClient,
+) -> None:
+    fake = FakeLLM(replies=["الحبس سنة على الأقل [1].", "الحبس مع الشغل [1]."])
+    _with_memory(grounded_client, fake)
+
+    post(grounded_client, text=THEFT)
+    post(grounded_client, text=ARMED)
+
+    assert fake.histories[0] == []
+    assert [(m.role, m.content) for m in fake.histories[1]] == [
+        ("user", THEFT),
+        ("assistant", "الحبس سنة على الأقل."),
+    ]
+
+
+def test_a_follow_up_is_searched_with_the_previous_question_as_context(
+    grounded_client: TestClient,
+) -> None:
+    """`مسلحاً` alone may lose the word that matters; the previous question has it."""
+    _, retriever = _with_memory(grounded_client, FakeLLM(text="جواب [1]."))
+
+    post(grounded_client, text=THEFT)
+    post(grounded_client, text=ARMED)
+
+    assert retriever.queries == [THEFT, ARMED]
+    assert retriever.contexts == [None, THEFT]
+
+
+def test_remembered_answers_lose_their_citation_numbers(
+    grounded_client: TestClient,
+) -> None:
+    """Last turn's [2] would point at this turn's passage 2."""
+    memory, _ = _with_memory(grounded_client, FakeLLM(text="الحبس [1] والغرامة [2]."))
+
+    post(grounded_client, text=THEFT)
+
+    assert memory.rows[1][1].content == "الحبس والغرامة."
+
+
+def test_a_refusal_is_remembered_as_a_refusal(grounded_client: TestClient) -> None:
+    memory = FakeMemory()
+    grounded_client.app.state.llm = FakeLLM()
+    grounded_client.app.state.memory = memory
+    grounded_client.app.state.retriever = FakeRetriever([])
+
+    post(grounded_client, text="كيكة الشوكولا")
+
+    assert [m.role for m in memory.rows[1]] == ["user", "assistant"]
+    assert "لم أجد" in memory.rows[1][1].content
+
+
+def test_a_failed_answer_is_not_remembered(grounded_client: TestClient) -> None:
+    """Asking again after an error should look like asking the first time."""
+    memory, _ = _with_memory(grounded_client, FakeLLM(fails=True))
+
+    post(grounded_client, text=THEFT)
+
+    assert memory.rows == {}
+
+
+def test_commands_are_not_remembered(grounded_client: TestClient) -> None:
+    memory, _ = _with_memory(grounded_client, FakeLLM())
+
+    post(grounded_client, text="/ping")
+
+    assert memory.rows == {}
+
+
+def test_reset_forgets_the_conversation(grounded_client: TestClient) -> None:
+    fake = FakeLLM(text="جواب [1].")
+    memory, _ = _with_memory(grounded_client, fake)
+    post(grounded_client, text=THEFT)
+
+    body = post(grounded_client, text="/reset").json()
+    post(grounded_client, text=ARMED)
+
+    assert body["handled_by"] == "command.reset"
+    assert fake.histories[-1] == []
+
+
+def test_a_broken_memory_still_answers(grounded_client: TestClient) -> None:
+    """Postgres down costs the follow-up its context, not the user an answer."""
+    _with_memory(grounded_client, FakeLLM(text="جواب [1]."), FakeMemory(fails=True))
+
+    body = post(grounded_client, text=THEFT).json()
+
+    assert body["handled_by"] == "model.grounded"
+
+
+def test_history_is_trimmed_oldest_first_and_starts_with_a_question() -> None:
+    from app.api.responder import _fit_history
+    from app.llm.base import Message
+
+    history = [
+        Message("user", "س" * 50),
+        Message("assistant", "ج" * 50),
+        Message("user", "س" * 30),
+        Message("assistant", "ج" * 30),
+    ]
+    # 50 + 30 + 30 fits; the oldest question does not, so its answer - now
+    # leading - goes too.
+    assert [len(m.content) for m in _fit_history(history, 110)] == [30, 30]
+
+
+def test_healthz_reports_memory(client: TestClient) -> None:
+    assert client.get("/healthz").json()["memory"] == "disabled"
+
+
+def test_an_answer_cut_off_by_the_token_limit_says_so(
+    grounded_client: TestClient,
+) -> None:
+    """A legal list that stops halfway reads as complete unless it is marked."""
+    from app.llm.client import LLMResult
+
+    class CutOffLLM(FakeLLM):
+        async def complete(self, system, user_message, max_tokens=1024, history=()):
+            return LLMResult(
+                text="- المادة 626 [1]\n-", model="m", input_tokens=1,
+                output_tokens=1024, stop_reason="length",
+            )
+
+    _with_memory(grounded_client, CutOffLLM())
+
+    reply = post(grounded_client, text=THEFT).json()["reply"]
+
+    assert "انقطع الجواب" in reply

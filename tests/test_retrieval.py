@@ -173,3 +173,41 @@ def test_a_retrieved_result_can_always_name_its_source() -> None:
     for result in retriever.retrieve("س", threshold=0.5).results:
         assert result.source and result.page
         assert str(result.page) in result.citation
+
+
+# --- follow-ups (Phase 9) ------------------------------------------------------
+
+
+class ScriptedStore(FakeStore):
+    """Answers each search with the next scripted list of hits."""
+
+    def __init__(self, *answers: list[SearchResult]) -> None:
+        super().__init__([])
+        self.answers = list(answers)
+
+    def search(self, vector, *, limit, domain=None, source=None, score_threshold=0.0):
+        self.calls.append({"limit": limit})
+        return self.answers.pop(0)[:limit]
+
+
+def test_with_context_both_searches_run_and_the_best_passages_win() -> None:
+    """A follow-up is found with its context, a new topic without it."""
+    embedder = FakeEmbedder()
+    store = ScriptedStore(
+        [hit(0.61, page=99), hit(0.50, page=53)],  # the follow-up alone
+        [hit(0.69, page=99), hit(0.66, page=100)],  # with the previous question
+    )
+    retriever = Retriever(embedder=embedder, store=store)  # type: ignore[arg-type]
+
+    found = retriever.retrieve("وإذا كان مسلحا؟", context="ما عقوبة السرقة؟", top_k=3)
+
+    assert len(embedder.queries) == 2
+    assert "السرقة" in embedder.queries[1] and "مسلحا" in embedder.queries[1]
+    # Page 99 came back from both searches: once, at its better score.
+    assert [(r.page, r.score) for r in found.results] == [(99, 0.69), (100, 0.66), (53, 0.50)]
+
+
+def test_without_context_there_is_one_search() -> None:
+    retriever, embedder, _ = make([hit(0.8)])
+    retriever.retrieve("سؤال")
+    assert len(embedder.queries) == 1

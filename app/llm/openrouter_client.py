@@ -23,11 +23,13 @@ worse than no table, because it looks authoritative.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import httpx
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.llm.base import LLMResult, strip_thinking
+from app.llm.base import LLMResult, Message, strip_thinking
 
 log = get_logger(__name__)
 
@@ -44,6 +46,7 @@ class OpenRouterClient:
                 "LLM_PROVIDER to ollama."
             )
         self._model = settings.openrouter_model
+        self._reasoning_effort = settings.openrouter_reasoning_effort.strip()
         self._client = httpx.AsyncClient(
             base_url=settings.openrouter_base_url.rstrip("/"),
             headers={
@@ -60,18 +63,30 @@ class OpenRouterClient:
         self,
         system: str,
         user_message: str,
-        max_tokens: int = 1024,
+        # Generous on purpose. Reasoning models spend part of this budget on
+        # thinking the reader never sees: Nemotron 3 Ultra used all of 1024
+        # and stopped three lines into a legal answer. Free models bill
+        # nothing, and a paid one bills what it uses, not what it may use.
+        max_tokens: int = 4096,
+        history: Sequence[Message] = (),
     ) -> LLMResult:
         payload = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system},
+                *(m.as_dict() for m in history),
                 {"role": "user", "content": user_message},
             ],
             "max_tokens": max_tokens,
             # Ask for the real cost of this call rather than guessing it.
             "usage": {"include": True},
         }
+        if self._reasoning_effort:
+            # How long a reasoning model thinks before answering. Nemotron 3
+            # Ultra at its default took two minutes on a follow-up with
+            # history - past n8n's timeout. At "low": 31 seconds, shorter,
+            # still correct and cited. Models that do not reason ignore it.
+            payload["reasoning"] = {"effort": self._reasoning_effort}
         # A 200 is not always an answer. The free upstreams sometimes return a
         # success status whose body carries an error and no `choices` - six of
         # the first ten benchmark calls to Nemotron Ultra, and a real Telegram

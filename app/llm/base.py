@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from app.core.logging import get_logger
 
@@ -32,6 +33,22 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (2.00, 10.00),
     "claude-haiku-4-5-20251001": (1.00, 5.00),
 }
+
+
+@dataclass(frozen=True)
+class Message:
+    """One earlier turn of the conversation, as every provider expects it.
+
+    All three APIs take the same `{"role", "content"}` pairs, so history is
+    defined once here and the memory store returns exactly this. A provider
+    never learns that the turns came out of Postgres.
+    """
+
+    role: Literal["user", "assistant"]
+    content: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"role": self.role, "content": self.content}
 
 
 @dataclass(frozen=True)

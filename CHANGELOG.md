@@ -6,6 +6,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 9] — 2026-10-07 — Conversation memory (awaiting review)
+
+**ADR-017** records the design and what was measured.
+
+### Added
+- `app/memory/store.py` — a `messages` table in Postgres, keyed by Telegram
+  chat. Created at startup if missing; `/healthz` reports `memory`.
+- History reaches all three providers as real user/assistant turns
+  (`Message` in `app/llm/base.py`).
+- `/reset` forgets the current conversation.
+- `MEMORY_ENABLED`, `MEMORY_MESSAGES` (8), `MEMORY_MAX_CHARS` (6000).
+- `OPENROUTER_REASONING_EFFORT` (default `low`).
+- 15 tests, two of them against the real Postgres to prove a conversation
+  survives a new store - which is what a restart is.
+
+### Changed
+- A follow-up is searched with and without the previous question, and the
+  best passages from either win (`Retriever.retrieve(context=...)`).
+- `API_VERSION` is `0.9.0`.
+
+### Fixed
+- OpenRouter answers were cut off: Nemotron 3 Ultra spent its 1024-token
+  budget mostly on hidden reasoning. The budget is 4096, and an answer that
+  still hits it now says it was cut rather than reading as complete.
+
+### Verified
+- Live, on a test chat: theft at night, then "and if he was armed?", then -
+  after restarting the API - "and in daytime?". The third answer used the
+  first two (`memory.loaded messages=4` after the restart).
+
+### Not done
+- Prompt caching: deferred, ADR-017 Decision 3 says why.
+
+---
+
 ## [Milestone 2] — 2026-10-07 — Grounded answers in Telegram
 
 Phases 7 and 8 closed. Asked in Telegram about theft, homicide and crimes

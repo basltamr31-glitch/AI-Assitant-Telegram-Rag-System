@@ -62,3 +62,5 @@ class HealthResponse(BaseModel):
     # "ready", "disabled" or "unavailable" - the difference between an
     # operator turning grounding off and a knowledge base that is broken.
     retrieval: str = "unknown"
+    # The same three states for conversation memory (Phase 9).
+    memory: str = "unknown"

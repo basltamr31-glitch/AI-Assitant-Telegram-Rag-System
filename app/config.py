@@ -67,7 +67,10 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Free, 27B, 262k context - and far stronger in Arabic than anything that
     # fits on this laptop. `scripts/list_models.py` shows the current options.
-    openrouter_model: str = "qwen/qwen3.8-27b:free"
+    openrouter_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    # "low", "medium" or "high" for a reasoning model; empty leaves it to the
+    # provider. Low keeps answers inside n8n's timeout: see openrouter_client.
+    openrouter_reasoning_effort: str = "low"
 
     # --- Ollama: a model running on this machine ------------------------------
     ollama_base_url: str = "http://localhost:11434"
@@ -169,6 +172,18 @@ class Settings(BaseSettings):
     # Characters of retrieved context passed to the model. A budget, not a
     # limit on the answer: more passages crowd out the question.
     retrieval_context_chars: int = 6000
+
+    # --- Conversation memory (Phase 9) ----------------------------------------
+    # False makes every message stand alone again, as before Phase 9.
+    memory_enabled: bool = True
+    # How many earlier messages (questions and answers both) the model sees.
+    # Eight is four exchanges: enough for "and if he was armed?" to know what
+    # "he" is, short enough that the passages still dominate the prompt.
+    memory_messages: int = 8
+    # A long legal answer can run to 2000 characters, and history competes
+    # with the passages for the model's attention. Older turns beyond this
+    # budget are dropped first.
+    memory_max_chars: int = 6000
 
     # --- Postgres -------------------------------------------------------------
     postgres_user: str = "assistant"

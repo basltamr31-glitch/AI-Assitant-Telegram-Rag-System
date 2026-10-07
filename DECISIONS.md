@@ -183,6 +183,81 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-017 — Conversation memory: recent turns from Postgres, and follow-ups searched with their context
+
+**Date:** 2026-10-07 · **Status:** Accepted
+
+**Context.** Until Phase 9 every message stood alone. "وإذا كان السارق
+مسلحاً؟" after a theft question reached the model with no idea what it was
+following up on.
+
+### Decision 1 — The last few turns, verbatim, keyed by Telegram chat
+
+One `messages` table in Postgres (ADR-002), keyed by `chat_id`: Telegram
+already gives every conversation its own id, so there is no session concept to
+invent. The last `MEMORY_MESSAGES` (8) messages are read back, trimmed oldest
+first to `MEMORY_MAX_CHARS` (6000), and sent as real user/assistant turns.
+`/reset` deletes a chat's rows.
+
+What is stored is chosen, not incidental. A question and its answer, or its
+refusal - so the model knows nothing was found. Never a command, and never a
+failure: after "the model did not answer", asking again should look like
+asking for the first time. Citation numbers are stripped from stored answers,
+because last turn's `[2]` would otherwise point at this turn's passage 2.
+
+The grounded prompt says the conversation tells the model what the user
+*means*, and is never a source of facts: every claim must still cite a passage.
+
+**Alternatives considered.** *A running summary of the conversation* - saves
+tokens, costs a model call per message and loses exact wording, which is what
+a legal follow-up depends on. *Long-term memory of facts about the user* - not
+a problem anyone has yet.
+
+### Decision 2 — Follow-ups are searched twice, with and without the previous question
+
+A vector search on "وإذا كان مسلحاً؟" alone may miss the word that matters.
+So retrieval also searches the previous question and this one together, and
+keeps the best-scoring passages from either search. Measured on the penal code:
+
+| Question after "ما عقوبة السرقة؟" | Alone | Together | Merged result |
+|---|---|---|---|
+| وإذا كان السارق مسلحاً؟ | theft, 0.61 | theft, 0.69 | theft, 0.69 |
+| ما عقوبة القتل قصدا؟ | homicide, 0.69 | theft and homicide mixed, 0.61 | homicide, 0.69 |
+
+Searching only together would have mixed theft into a homicide answer; only
+alone, it would have weakened the follow-up. Merging gets both right without
+having to guess which kind of question this is.
+
+**Alternative considered.** *Ask the model to rewrite the follow-up as a
+standalone question first* - the standard technique, and likely better on
+harder cases. Rejected for now: a second model call per message doubles the
+latency (Nemotron 3 Ultra already takes 30 s) and halves the free tier's 50
+requests a day. Phase 14's eval set is where it gets reconsidered.
+
+### Decision 3 — Prompt caching deferred
+
+The roadmap puts prompt caching in Phase 9. It is not built, deliberately.
+Caching is an Anthropic feature, and the bot runs on a free OpenRouter model;
+even on Anthropic, the stable part of the grounded prompt - the rules - is
+around 600 tokens, below the minimum prefix Anthropic will cache, and the
+passages after it change every message. Code for it today would be untestable
+and unused. It returns when the provider is Anthropic and the prompt has a
+stable prefix worth caching.
+
+### Decision 4 — Synchronous psycopg in a thread
+
+psycopg's async mode cannot run on the Proactor event loop uvicorn uses on
+Windows. One short query per message gains nothing from native async, so the
+store uses plain connections inside `asyncio.to_thread`, one per call. A pool
+is Phase 15's concern.
+
+**Tradeoffs.** History makes every prompt longer (about 2000 input tokens for
+a third follow-up), which costs time on a reasoning model; see the reasoning
+effort setting in `openrouter_client.py`. Message text now lives in Postgres
+- the logs still never contain it.
+
+---
+
 ## ADR-016 — Ingestion for scanned Arabic books: vision OCR, a model chain, and a multilingual embedder
 
 **Date:** 2026-10-02 · **Status:** Accepted (amends ADR-003)

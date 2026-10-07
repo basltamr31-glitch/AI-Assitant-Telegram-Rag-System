@@ -99,22 +99,54 @@ class Retriever:
         self,
         query: str,
         *,
+        context: str | None = None,
         domain: str | None = None,
         source: str | None = None,
         top_k: int | None = None,
         threshold: float | None = None,
     ) -> Retrieved:
+        """Search for `query`; with `context`, also for both together.
+
+        `context` is the previous question in the conversation. A follow-up
+        like "وإذا كان مسلحاً؟" is better found together with the question it
+        follows: on the penal code that lifted the theft articles from 0.61
+        to 0.69. A change of topic is the opposite case - "ما عقوبة القتل؟"
+        after a theft question finds homicide alone at 0.69, and a theft-
+        and-homicide mixture together at 0.61. Running both searches and
+        keeping the best-scoring passages from either gets each case right
+        without having to guess which one this is.
+        """
         limit = top_k or self._top_k
         cutoff = self._threshold if threshold is None else threshold
 
         cleaned = normalise(query)
-        vector = self._embedder.embed_query(cleaned)
+        queries = [cleaned]
+        if context:
+            queries.append(normalise(f"{context}\n{query}"))
 
         # Search without a score filter, then apply the threshold here, so the
         # near-misses are available to log rather than discarded by the store.
-        hits = self._store.search(
-            vector, limit=limit, domain=domain, source=source, score_threshold=0.0
-        )
+        searches = [
+            self._store.search(
+                self._embedder.embed_query(q),
+                limit=limit,
+                domain=domain,
+                source=source,
+                score_threshold=0.0,
+            )
+            for q in queries
+        ]
+        if len(searches) == 1:
+            hits = searches[0]
+        else:
+            # The same passage usually comes back from both; keep it once, at
+            # the better of its two scores.
+            best: dict[tuple, SearchResult] = {}
+            for hit in (h for found in searches for h in found):
+                key = (hit.source, hit.page, hit.label, hit.text)
+                if key not in best or hit.score > best[key].score:
+                    best[key] = hit
+            hits = sorted(best.values(), key=lambda h: h.score, reverse=True)[:limit]
         kept = [h for h in hits if h.score >= cutoff]
         rejected = [h for h in hits if h.score < cutoff]
 
@@ -123,6 +155,7 @@ class Retriever:
             # The query itself is not logged, for the same reason message text
             # is not: logs travel, questions are private.
             query_chars=len(cleaned),
+            with_context=bool(context),
             domain=domain,
             returned=len(kept),
             rejected=len(rejected),
