@@ -22,15 +22,24 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import TextIO
 
 import structlog
 
 
-def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
-    """Configure structlog once, at application start."""
+def configure_logging(
+    level: str = "INFO", json_output: bool = False, stream: TextIO | None = None
+) -> None:
+    """Configure structlog once, at application start.
+
+    `stream` defaults to stdout. The MCP server passes stderr: over the stdio
+    transport, stdout *is* the protocol, and one log line written there is a
+    malformed message that ends the session.
+    """
+    stream = stream or sys.stdout
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        stream=stream,
         level=getattr(logging, level.upper(), logging.INFO),
     )
 
@@ -44,7 +53,7 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
     processors.append(
         structlog.processors.JSONRenderer()
         if json_output
-        else structlog.dev.ConsoleRenderer(colors=True)
+        else structlog.dev.ConsoleRenderer(colors=stream.isatty())
     )
 
     structlog.configure(
@@ -52,7 +61,7 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, level.upper(), logging.INFO)
         ),
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.PrintLoggerFactory(file=stream),
         cache_logger_on_first_use=True,
     )
 

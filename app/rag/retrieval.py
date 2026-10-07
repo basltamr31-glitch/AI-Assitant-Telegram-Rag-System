@@ -87,6 +87,10 @@ _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 class Retriever:
     """Embeds a question, searches, and applies the threshold."""
 
+    def documents(self) -> dict[str, int]:
+        """What the knowledge base holds: source file -> passage count."""
+        return self._store.documents()
+
     def article(self, number: str | int) -> Retrieved:
         """The article with this number, looked up exactly (Phase 10).
 

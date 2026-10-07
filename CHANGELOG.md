@@ -6,6 +6,33 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 11] — 2026-10-08 — The knowledge base over MCP (awaiting review)
+
+**ADR-019** records the choices; ADR-006 why the bot itself does not use MCP.
+
+### Added
+- `app/mcp/server.py` — an MCP server over stdio: tools
+  `search_knowledge_base` and `get_article`, resources `kb://documents` and
+  `kb://article/{number}`. Read-only.
+- `scripts/mcp_client.py` — a client that starts the server as a separate
+  process and calls a tool, printing each step.
+- `Retriever.documents()` / `VectorStore.documents()` — a Qdrant facet: each
+  source file and its passage count.
+- 6 tests through a real MCP client, connected in-process.
+- `mcp>=2.3,<3` in `requirements.txt`.
+
+### Changed
+- `configure_logging` takes a `stream`; the MCP server logs to stderr,
+  because on stdio, stdout is the protocol. Colours are used only on a
+  terminal, so redirected logs are plain text.
+
+### Verified
+- `scripts/mcp_client.py`: connected to the server subprocess, listed 2 tools
+  and 2 resources, read `kb://documents` (754 + 44 passages), and a search
+  returned Articles 626, 628, 622, 624 and 634.
+
+---
+
 ## [Phase 10] — 2026-10-07 — The agent decides when to search
 
 **ADR-018** records the design and the four rules.

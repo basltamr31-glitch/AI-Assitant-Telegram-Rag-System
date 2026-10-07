@@ -120,6 +120,32 @@ Services once running:
 | Qdrant dashboard | http://localhost:6333/dashboard |
 | Postgres | localhost:5432 |
 
+### The knowledge base over MCP (Phase 11)
+
+The same documents, for other AI clients such as Claude Desktop. The server
+is read-only: two tools (`search_knowledge_base`, `get_article`) and two
+resources (`kb://documents`, `kb://article/{number}`). Qdrant must be running.
+
+```powershell
+# See it work, with no model involved: starts the server, lists what it
+# offers, and calls a tool over stdio.
+.venv\Scripts\python.exe scripts/mcp_client.py "عقوبة الرشوة"
+.venv\Scripts\python.exe scripts/mcp_client.py --article 535
+```
+
+To add it to Claude Desktop, put this in `%APPDATA%\Claude\claude_desktop_config.json`
+under `mcpServers`, with your own project path, and restart Claude Desktop:
+
+```json
+"telegram-assistant-kb": {
+  "command": "C:\\path\\to\\project\\.venv\\Scripts\\python.exe",
+  "args": ["-m", "app.mcp.server"],
+  "cwd": "C:\\path\\to\\project"
+}
+```
+
+The server finds `.env` by itself, wherever the client starts it from.
+
 ## Documentation
 
 | File | Contents |
@@ -132,5 +158,6 @@ Services once running:
 
 ## Project status
 
-Phase 5 of 15 complete — the bot converses. Milestone 1 reached.
-See `ROADMAP.md`.
+Phases 0-10 complete, Phase 11 in progress. Milestones 1 and 2 reached: the
+bot answers from the Syrian penal code with citations, remembers the
+conversation, and decides for itself when to search. See `ROADMAP.md`.

@@ -183,6 +183,33 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-019 — The MCP server: stdio, read-only, and the agent's own tools
+
+**Date:** 2026-10-08 · **Status:** Accepted (implements ADR-006)
+
+**Decision 1 — stdio transport.** The client starts the server as a
+subprocess and talks over its stdin/stdout. Claude Desktop launches local
+servers exactly this way, and stdio needs no port, no auth and no TLS: only a
+process the user's own client started can reach it. Streamable HTTP is the
+choice when a server is remote or shared - not the case here. The one hazard
+is that stdout *is* the protocol, so all logging goes to stderr
+(`configure_logging(stream=...)`), and one stray `print` would end a session.
+
+**Decision 2 — the agent's tools, imported, not copied.** Same names, same
+descriptions, same threshold, same `NO_RESULTS` refusal (ADR-006's "shared
+logic in one module": `app/agent/tools.py`). Another client gets exactly the
+evidence the bot would. Each call numbers its passages from `[1]`; there is
+no turn here to number across.
+
+**Decision 3 — read-only.** Search, look up, list. No ingestion or deletion
+over MCP: a client that can reach this server can read the documents and
+nothing else, and the tools say so in their annotations.
+
+**Decision 4 — `mcp` 2.x.** 2.x renamed `FastMCP` to `MCPServer`; most
+examples online are 1.x and will not run. Pinned `>=2.3,<3`.
+
+---
+
 ## ADR-018 — The agent: the model picks the tool, the code keeps the rules
 
 **Date:** 2026-10-07 · **Status:** Accepted (completes ADR-005's sequence)

@@ -26,6 +26,10 @@ pypdf>=4.0               # reads PDFs; per-page text and images
 pillow>=10.0             # scales page images before they go to OCR
 sentence-transformers>=3.0  # local embeddings (ADR-003); pulls torch
 
+# --- Phase 11: the MCP server -------------------------------------------------
+mcp>=2.3,<3              # the knowledge base for other AI clients (ADR-006);
+                         # 2.x renamed FastMCP to MCPServer, so v1 examples
+                         # online will not run against this
+
 # Added later:
 #   Phase 6  python-docx, openpyxl, python-pptx, beautifulsoup4 (later slices)
-#   Phase 11 mcp

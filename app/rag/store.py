@@ -256,6 +256,16 @@ class VectorStore:
             for p in points
         ]
 
+    def documents(self) -> dict[str, int]:
+        """Every source document in the collection, with its chunk count.
+
+        A facet over the indexed `source` field: Qdrant counts, nothing is
+        scanned on our side. Used by the MCP server so another client can
+        see what the knowledge base holds before searching it.
+        """
+        hits = self._client.facet(self.collection, key="source", exact=True).hits
+        return {str(h.value): h.count for h in hits}
+
     def count(self, domain: str | None = None) -> int:
         """How many chunks are stored, optionally for one domain."""
         flt = None
