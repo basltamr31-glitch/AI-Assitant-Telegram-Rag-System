@@ -69,6 +69,12 @@ ARTICLE = ToolSpec(
 
 TOOLS = (SEARCH, ARTICLE)
 
+# A search query is a handful of key words. Anything longer is a model gone
+# wrong or a client probing, and every character costs embedding time on a
+# CPU. Cut, not rejected: the start of a long query is still a query.
+# THREAT_MODEL.md T7.
+MAX_QUERY_CHARS = 500
+
 NO_RESULTS = (
     "NO_RESULTS: nothing in the user's documents matches this. Do not answer "
     "from your own knowledge."
@@ -128,7 +134,7 @@ def execute(
     """
     log.info("agent.tool_call", tool=call.name, arguments=sorted(call.arguments))
     if call.name == SEARCH.name:
-        query = str(call.arguments.get("query", "")).strip()
+        query = str(call.arguments.get("query", "")).strip()[:MAX_QUERY_CHARS]
         if not query:
             return "ERROR: search_knowledge_base needs a non-empty 'query'."
         found = retriever.retrieve(query, context=context)

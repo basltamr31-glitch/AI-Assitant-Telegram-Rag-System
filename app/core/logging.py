@@ -21,10 +21,67 @@ JSON. Same call sites, different renderer.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from typing import TextIO
 
 import structlog
+
+
+# --- secret redaction (Phase 12) ---------------------------------------------
+#
+# The code never logs a key on purpose. That is a habit, and habits fail: one
+# `log.error(body=response.text)` from a provider that echoes the request, or
+# a traceback that prints a connection string, and the secret is on disk in
+# a file that gets pasted into bug reports. This is the guarantee behind the
+# habit - every structlog line passes through it before it is written.
+# THREAT_MODEL.md T8.
+_SECRET_SHAPES = [
+    re.compile(r"sk-or-v1-[A-Za-z0-9]{8,}"),  # OpenRouter
+    re.compile(r"sk-ant-[A-Za-z0-9_-]{8,}"),  # Anthropic
+    re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{30,}"),  # Telegram bot token
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+]
+# The password inside a DSN: postgresql://user:PASSWORD@host
+_DSN_PASSWORD = re.compile(r"(://[^:/@\s]+:)[^@\s]+(@)")
+REDACTED = "[REDACTED]"
+
+
+def _configured_secrets() -> list[str]:
+    """The actual secret values in use, so they are caught whatever shape.
+
+    Imported here, not at module level: config imports logging, and settings
+    may not load at all (no .env yet) - redaction must never be what breaks
+    a log line.
+    """
+    try:
+        from app.config import get_settings
+
+        s = get_settings()
+        values = [
+            s.internal_api_key, s.openrouter_api_key, s.anthropic_api_key,
+            s.postgres_password,
+        ]
+        return [v.get_secret_value() for v in values if len(v.get_secret_value()) >= 8]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def redact(text: str) -> str:
+    for secret in _configured_secrets():
+        text = text.replace(secret, REDACTED)
+    for shape in _SECRET_SHAPES:
+        text = shape.sub(REDACTED, text)
+    return _DSN_PASSWORD.sub(rf"\1{REDACTED}\2", text)
+
+
+def _redact_processor(logger, method_name, event_dict: dict) -> dict:
+    for key, value in event_dict.items():
+        if isinstance(value, str):
+            event_dict[key] = redact(value)
+        elif isinstance(value, (list, tuple, dict)):
+            event_dict[key] = redact(str(value))
+    return event_dict
 
 
 def configure_logging(
@@ -49,6 +106,8 @@ def configure_logging(
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # Last before rendering, so it also sees the formatted traceback.
+        _redact_processor,
     ]
     processors.append(
         structlog.processors.JSONRenderer()

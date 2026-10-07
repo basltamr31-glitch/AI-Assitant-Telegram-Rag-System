@@ -83,6 +83,12 @@ MODEL_UNAVAILABLE = (
     "Commands still work — try <code>/help</code>."
 )
 
+RATE_LIMITED = (
+    "⏳ <b>رسائل كثيرة في وقت قصير.</b>\n\n"
+    "أتوقف قليلاً كي لا تنفد حصة اليوم من الطلبات. "
+    "حاول بعد نحو {minutes} دقيقة."
+)
+
 MODEL_FAILED = (
     "⚠️ <b>The model did not answer.</b>\n\n"
     "The error is in the server log, under this message's trace id. "

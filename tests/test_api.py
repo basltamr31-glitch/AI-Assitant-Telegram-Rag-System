@@ -653,3 +653,22 @@ def test_an_answer_cut_off_by_the_token_limit_says_so(
     reply = post(grounded_client, text=THEFT).json()["reply"]
 
     assert "انقطع الجواب" in reply
+
+
+# --- Phase 12: rate limit -------------------------------------------------------
+
+
+def test_too_many_messages_get_a_polite_refusal_not_silence(client: TestClient) -> None:
+    from app.api.ratelimit import SlidingWindowLimiter
+
+    client.app.state.limiter = SlidingWindowLimiter(2, 600)
+    fake = FakeLLM()
+    client.app.state.llm = fake
+
+    bodies = [post(client, text=f"سؤال {i}").json() for i in range(3)]
+
+    assert [b["handled_by"] for b in bodies[:2]] == ["model", "model"]
+    assert bodies[2]["handled_by"] == "rate_limited"
+    assert "دقيقة" in bodies[2]["reply"]
+    # The limited message never reached the model.
+    assert len(fake.calls) == 2

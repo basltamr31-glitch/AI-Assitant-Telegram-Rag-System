@@ -30,7 +30,8 @@ import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.responder import respond
+from app.api.ratelimit import SlidingWindowLimiter
+from app.api.responder import RATE_LIMITED, respond
 from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
 from app.api.security import require_allowed_user, require_api_key
 from app.config import get_settings
@@ -39,7 +40,7 @@ from app.llm.client import create_llm_client
 from app.memory.store import ConversationStore
 from app.rag.retrieval import Retriever
 
-API_VERSION = "0.10.0"
+API_VERSION = "0.12.0"
 
 log = get_logger(__name__)
 
@@ -121,6 +122,9 @@ def create_app() -> FastAPI:
     app.state.retriever = retriever
     app.state.grounded = settings.retrieval_enabled
     app.state.memory = memory
+    app.state.limiter = SlidingWindowLimiter(
+        settings.rate_limit_messages, settings.rate_limit_window_s
+    )
 
     @app.middleware("http")
     async def trace_and_log(request: Request, call_next):
@@ -192,6 +196,18 @@ def create_app() -> FastAPI:
         require_allowed_user(payload.user_id)
 
         trace_id = structlog.contextvars.get_contextvars().get("trace_id", "")
+        if not request.app.state.limiter.allow(payload.user_id):
+            # A 200 with a reply, not a 429: n8n sends whatever comes back,
+            # and the user should learn why the bot went quiet rather than
+            # hear nothing at all.
+            wait = round(request.app.state.limiter.retry_after(payload.user_id) / 60) or 1
+            log.warning("chat.rate_limited", user_id=payload.user_id)
+            return ChatResponse(
+                reply=RATE_LIMITED.format(minutes=wait),
+                handled_by="rate_limited",
+                trace_id=trace_id,
+            )
+
         reply, handled_by, sources = await respond(
             payload,
             request.app.state.llm,

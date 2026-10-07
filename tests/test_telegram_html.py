@@ -38,9 +38,15 @@ def test_bare_angle_brackets_are_escaped() -> None:
     assert sanitise("if x < 3 and y > 4") == "if x &lt; 3 and y &gt; 4"
 
 
-def test_dangerous_attributes_are_stripped() -> None:
-    out = sanitise('<a href="https://x.com" onclick="evil()">link</a>')
-    assert out == '<a href="https://x.com">link</a>'
+def test_a_link_shows_where_it_goes() -> None:
+    """No hidden destinations: link text cannot disguise the address."""
+    out = sanitise('<a href="https://x.com" onclick="evil()">المصدر الرسمي</a>')
+    assert out == "المصدر الرسمي (https://x.com)"
+
+
+def test_a_link_with_a_dangerous_scheme_keeps_only_its_text() -> None:
+    for href in ("javascript:alert(1)", "tg://resolve?domain=x", "file:///etc/passwd", ""):
+        assert sanitise(f'<a href="{href}">اضغط هنا</a>') == "اضغط هنا"
 
 
 def test_script_tag_cannot_survive() -> None:

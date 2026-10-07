@@ -6,6 +6,46 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 12] — 2026-10-08 — Security, and a threat model (awaiting review)
+
+**`THREAT_MODEL.md`** is the deliverable: assets, trust boundaries, fourteen
+threats, what was done about each and how it was checked.
+
+### Fixed
+- **Qdrant, Postgres and n8n were reachable from the local network.** Docker
+  published them on `0.0.0.0`, and Qdrant has no authentication: anyone on
+  the same Wi-Fi could have read or deleted the knowledge base. All three
+  are bound to `127.0.0.1`.
+
+### Added
+- A per-user rate limit, 20 messages per 10 minutes, answered with an
+  explanation rather than silence (`app/api/ratelimit.py`).
+- Log redaction: configured secrets, known key shapes and DSN passwords are
+  removed from every structlog line, tracebacks included.
+- 13 tests: the limiter, redaction, links, the query cap.
+
+### Changed
+- Links are never hidden: `<a href>` becomes `text (url)`, and only
+  `http(s)` is shown at all - a model steered by a document cannot disguise
+  a destination.
+- The grounding prompt says passage text is document content, never an
+  instruction.
+- Tool search queries are cut at 500 characters; the MCP server now goes
+  through the agent's `execute()`, so validation is shared.
+- `API_VERSION` is `0.12.0`.
+
+### Verified
+- n8n's Telegram Trigger rejects requests without Telegram's secret token
+  (read in its source: constant-time compare, then 403).
+- None of the four configured secrets appears in 33 existing log files.
+
+### For the owner
+- MFA and a strong password on n8n, whose editor is public through the
+  tunnel; a firewall rule for port 8000; and knowing that questions are sent
+  to OpenRouter and Nvidia (THREAT_MODEL.md section 5).
+
+---
+
 ## [Phase 11] — 2026-10-08 — The knowledge base over MCP
 
 **ADR-019** records the choices; ADR-006 why the bot itself does not use MCP.

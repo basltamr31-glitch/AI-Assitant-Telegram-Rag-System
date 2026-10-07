@@ -153,6 +153,7 @@ The server finds `.env` by itself, wherever the client starts it from.
 | `ARCHITECTURE.md` | System design, layers, data flow |
 | `ROADMAP.md` | 16 phases, deliverables, status |
 | `DECISIONS.md` | Architecture decision records - what and why |
+| `THREAT_MODEL.md` | What is protected, from whom, and how - with owner actions |
 | `LEARNING.md` | Concept glossary, phase by phase |
 | `CHANGELOG.md` | What changed, when |
 

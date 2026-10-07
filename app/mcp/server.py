@@ -44,8 +44,9 @@ from pathlib import Path
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
-from app.agent.tools import ARTICLE, NO_RESULTS, SEARCH, Evidence
+from app.agent.tools import ARTICLE, NO_RESULTS, SEARCH, Evidence, execute
 from app.core.logging import get_logger
+from app.llm.base import ToolCall
 from app.rag.retrieval import Retriever
 
 log = get_logger(__name__)
@@ -86,16 +87,16 @@ def search_knowledge_base(query: str) -> str:
     # Each call numbers its own passages from [1]. The bot numbers across a
     # whole turn; here there is no turn, only the client's calls, and a
     # client that calls twice sees two independently numbered lists.
+    # Through the agent's own `execute`, so validation and the query cap are
+    # the same for every client.
     log.info("mcp.tool_call", tool=SEARCH.name)
-    if not query.strip():
-        return "ERROR: search_knowledge_base needs a non-empty 'query'."
-    return Evidence().add(retriever().retrieve(query).results)
+    return execute(ToolCall("mcp", SEARCH.name, {"query": query}), retriever(), Evidence())
 
 
 @server.tool(name=ARTICLE.name, description=ARTICLE.description, annotations=READ_ONLY)
 def get_article(number: int) -> str:
     log.info("mcp.tool_call", tool=ARTICLE.name)
-    return Evidence().add(retriever().article(number).results)
+    return execute(ToolCall("mcp", ARTICLE.name, {"number": number}), retriever(), Evidence())
 
 
 @server.resource(

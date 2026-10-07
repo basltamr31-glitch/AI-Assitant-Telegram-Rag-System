@@ -346,3 +346,12 @@ def test_articles_named_without_brackets_still_become_sources() -> None:
     # 628 follows the word مادة; ٦٢٢ and 300 do not; 999 was never retrieved.
     assert sources == ["المادة 628 (law.pdf, p.99)"]
     assert "<i>المصادر:</i>" in reply
+
+
+def test_an_overlong_search_query_is_cut() -> None:
+    """A query is a few key words; 50,000 characters is a model gone wrong."""
+    from app.agent.tools import MAX_QUERY_CHARS
+
+    retriever = FakeRetriever()
+    execute(ToolCall("1", "search_knowledge_base", {"query": "س" * 50_000}), retriever, Evidence())
+    assert len(retriever.searches[0][0]) == MAX_QUERY_CHARS

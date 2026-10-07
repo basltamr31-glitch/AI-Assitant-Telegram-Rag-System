@@ -173,6 +173,12 @@ class Settings(BaseSettings):
     # limit on the answer: more passages crowd out the question.
     retrieval_context_chars: int = 6000
 
+    # --- Rate limit (Phase 12) --------------------------------------------------
+    # Messages per user per window. Far above how fast a person asks
+    # questions, far below what drains fifty model requests a day.
+    rate_limit_messages: int = 20
+    rate_limit_window_s: int = 600
+
     # --- Agent (Phase 10) ------------------------------------------------------
     # True lets the model decide when to search; false brings back Phase 8's
     # search-on-every-message pipeline. Only providers that can call tools

@@ -31,12 +31,12 @@ from html.parser import HTMLParser
 # valid with class="tg-spoiler", and tg-spoiler covers that case already.
 ALLOWED_TAGS = frozenset(
     {"b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
-     "a", "code", "pre", "blockquote", "tg-spoiler"}
+     "code", "pre", "blockquote", "tg-spoiler"}
 )
 
 # Only these attributes survive, and only on these tags. Everything else is
 # dropped - an `onclick` or a `style` has no business reaching a chat client.
-ALLOWED_ATTRS = {"a": {"href"}, "code": {"class"}}
+ALLOWED_ATTRS = {"code": {"class"}}  # <a> is handled apart: see handle_starttag
 
 # Tags that carry no content and must never be emitted as a pair.
 VOID_TAGS = frozenset({"br", "hr", "img", "input", "meta", "link"})
@@ -47,6 +47,7 @@ class _TelegramSanitiser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.open_tags: list[str] = []
+        self.links: list[str] = []  # hrefs of <a> tags awaiting their close
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag in VOID_TAGS:
@@ -54,6 +55,16 @@ class _TelegramSanitiser(HTMLParser):
             # translation, and it keeps the text readable.
             if tag == "br":
                 self.parts.append("\n")
+            return
+        if tag == "a":
+            # No hidden links. A model steered by text inside an ingested
+            # document could write <a href="evil">المصدر الرسمي</a>; shown as
+            # "المصدر الرسمي (https://evil...)" the destination is visible,
+            # and Telegram links a bare URL by itself. Only http(s) is
+            # shown at all - not javascript:, tg: or file:.
+            # THREAT_MODEL.md T5.
+            href = dict(attrs).get("href") or ""
+            self.links.append(href if href.startswith(("http://", "https://")) else "")
             return
         if tag not in ALLOWED_TAGS:
             return  # drop the tag, keep whatever is inside it
@@ -68,6 +79,11 @@ class _TelegramSanitiser(HTMLParser):
         self.open_tags.append(tag)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "a":
+            href = self.links.pop() if self.links else ""
+            if href:
+                self.parts.append(f" ({html.escape(href, quote=False)})")
+            return
         if tag not in ALLOWED_TAGS or tag not in self.open_tags:
             return
         # Close anything the model opened inside this tag and forgot about,
