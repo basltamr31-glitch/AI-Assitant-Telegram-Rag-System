@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Sequence
 
 import httpx
 
 from app.config import get_settings
+from app.core.errors import ModelRejected, ModelUnavailable, QuotaExhausted, ServiceError
 from app.core.logging import get_logger
 from app.llm.base import (
     LLMResult,
@@ -42,7 +44,8 @@ from app.llm.base import (
 
 log = get_logger(__name__)
 
-_RETRY_DELAY_S = 3.0
+# Pauses before the second and third attempts. See _post_with_retries.
+_RETRY_DELAYS_S = (3.0, 6.0)
 
 
 class OpenRouterClient:
@@ -58,6 +61,9 @@ class OpenRouterClient:
             )
         self._model = settings.openrouter_model
         self._reasoning_effort = settings.openrouter_reasoning_effort.strip()
+        self._fallbacks = [
+            m.strip() for m in settings.openrouter_fallback_models.split(",") if m.strip()
+        ]
         self._client = httpx.AsyncClient(
             base_url=settings.openrouter_base_url.rstrip("/"),
             headers={
@@ -67,7 +73,9 @@ class OpenRouterClient:
                 "HTTP-Referer": "https://github.com/basltamr31-glitch/AI-Assitant-Telegram-Rag-System",
                 "X-Title": "Telegram AI Assistant",
             },
-            timeout=httpx.Timeout(120.0, connect=10.0),
+            # 75 s, not 120: two calls must fit inside n8n's 120 s, and a
+            # healthy answer at low reasoning effort takes 30-40 s.
+            timeout=httpx.Timeout(75.0, connect=10.0),
         )
 
     async def complete(
@@ -175,35 +183,15 @@ class OpenRouterClient:
             # history - past n8n's timeout. At "low": 31 seconds, shorter,
             # still correct and cited. Models that do not reason ignore it.
             payload["reasoning"] = {"effort": self._reasoning_effort}
-        # A 200 is not always an answer. The free upstreams sometimes return a
-        # success status whose body carries an error and no `choices` - six of
-        # the first ten benchmark calls to Nemotron Ultra, and a real Telegram
-        # question on 2026-10-07. It is transient, so it gets exactly one
-        # retry. General retry policy is still Phase 13's.
-        for attempt in (1, 2):
-            response = await self._client.post("/chat/completions", json=payload)
-            if response.status_code >= 400:
-                # OpenRouter puts the useful part in the body; the status alone
-                # does not distinguish "no credit" from "unknown model".
-                log.error(
-                    "llm.openrouter_error",
-                    status=response.status_code,
-                    body=response.text[:400],
-                )
-            response.raise_for_status()
-            data = response.json()
-            if data.get("choices"):
-                break
-            log.warning(
-                "llm.openrouter_no_choices", attempt=attempt, body=response.text[:400]
-            )
-            if attempt == 1:
-                # Usually "Upstream error from Nvidia: Service temporarily
-                # overloaded". Retrying one second later met the same
-                # overload; a few seconds gives it a chance to clear.
-                await asyncio.sleep(_RETRY_DELAY_S)
-        else:
-            raise RuntimeError("OpenRouter returned no choices, twice")
+        if self._fallbacks:
+            # OpenRouter's own fallback: if the first model errors or is
+            # overloaded, it tries the next within the same request. One
+            # round trip, and `data["model"]` says which one answered.
+            payload["models"] = [self._model, *self._fallbacks]
+
+        started = time.perf_counter()
+        data = await self._post_with_retries(payload)
+        duration_ms = round((time.perf_counter() - started) * 1000)
 
         choice = data["choices"][0]
         message = choice["message"]
@@ -232,8 +220,72 @@ class OpenRouterClient:
             cost_usd=result.cost_usd,
             stop_reason=result.stop_reason,
             tool_calls=[c.name for c in result.tool_calls],
+            duration_ms=duration_ms,
         )
         return result
+
+
+    async def _post_with_retries(self, payload: dict) -> dict:
+        """POST, and turn every way it can fail into a named error.
+
+        What is retried, after 3 s and then 6 s: an overloaded upstream (a
+        5xx, a 429 that is not the daily quota, or a 200 whose body is an
+        error with no `choices` - the free upstreams do all three), and a
+        connection that failed before anything was sent. One second later
+        the overload was usually still there; a few seconds clears it.
+
+        What is not: the day's quota (retrying cannot help and only makes
+        the user wait), a rejected request (a bad key or model name is a
+        configuration problem), and a timeout - a request that already took
+        a minute, repeated, would take the user past n8n's own timeout and
+        they would get nothing instead of an apology.
+        """
+        last: ServiceError | None = None
+        for attempt, delay in enumerate((*_RETRY_DELAYS_S, None), start=1):
+            try:
+                response = await self._client.post("/chat/completions", json=payload)
+            except httpx.TimeoutException as exc:
+                log.error("llm.timeout", attempt=attempt)
+                raise ModelUnavailable("timed out") from exc
+            except httpx.TransportError as exc:
+                last = ModelUnavailable(f"transport: {type(exc).__name__}")
+            else:
+                data, last = _classify(response)
+                if last is None:
+                    if attempt > 1:
+                        log.info("llm.recovered", attempt=attempt)
+                    return data
+                if not last.retryable:
+                    raise last
+            log.warning("llm.retrying", attempt=attempt, reason=str(last), next_in_s=delay)
+            if delay is None:
+                break
+            await asyncio.sleep(delay)
+        assert last is not None
+        raise last
+
+
+def _classify(response: httpx.Response) -> tuple[dict, ServiceError | None]:
+    """Read a response as data, or as the error it represents."""
+    body = response.text[:400]
+    if response.status_code >= 400:
+        # OpenRouter puts the useful part in the body; the status alone does
+        # not distinguish "no credit" from "unknown model".
+        log.error("llm.openrouter_error", status=response.status_code, body=body)
+        if response.status_code == 429:
+            if "free-models-per-day" in body:
+                return {}, QuotaExhausted(body)
+            return {}, ModelUnavailable("rate limited upstream")
+        if response.status_code >= 500:
+            return {}, ModelUnavailable(f"HTTP {response.status_code}")
+        return {}, ModelRejected(f"HTTP {response.status_code}")
+    data = response.json()
+    if not data.get("choices"):
+        # Usually "Upstream error from Nvidia: Service temporarily overloaded",
+        # with a 200 status.
+        log.warning("llm.openrouter_no_choices", body=body)
+        return {}, ModelUnavailable("no choices")
+    return data, None
 
 
 def _parse_tool_call(raw: dict) -> ToolCall:

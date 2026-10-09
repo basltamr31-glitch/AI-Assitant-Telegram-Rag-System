@@ -23,9 +23,11 @@ one is built.
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 
+import httpx
 import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -40,9 +42,17 @@ from app.llm.client import create_llm_client
 from app.memory.store import ConversationStore
 from app.rag.retrieval import Retriever
 
-API_VERSION = "0.12.0"
+API_VERSION = "0.13.0"
 
 log = get_logger(__name__)
+
+
+def _warm(retriever: Retriever) -> None:
+    try:
+        retriever.warm()
+    except Exception as exc:  # noqa: BLE001
+        # Not fatal: the first question loads it instead, slowly.
+        log.error("retrieval.warm_failed", reason=str(exc))
 
 
 def create_app() -> FastAPI:
@@ -98,6 +108,11 @@ def create_app() -> FastAPI:
         try:
             retriever = Retriever()
             log.info("retrieval.ready", collection=settings.qdrant_collection)
+            # Phase 13: load the embedding model now, in the background, so
+            # the first question after a restart does not spend 43 s on it.
+            # Daemon, so a slow load never holds up shutdown.
+            if settings.retrieval_warm_on_start:
+                threading.Thread(target=_warm, args=(retriever,), daemon=True).start()
         except Exception as exc:  # noqa: BLE001
             log.error("retrieval.unavailable", reason=str(exc))
     else:
@@ -166,22 +181,34 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", response_model=HealthResponse, tags=["ops"])
     async def healthz() -> HealthResponse:
+        """Up, and whether each dependency answers *now*.
+
+        Before Phase 13, "ready" meant "was constructed at startup": with
+        Qdrant stopped, /healthz still said `retrieval: ready`. Each check is
+        a real round trip with a one-second budget, so a stopped container
+        shows as `unreachable` within a second of being stopped.
+        """
+        retrieval = "disabled" if not app.state.grounded else "unavailable"
+        if app.state.retriever is not None:
+            retrieval = "ready" if await _reachable_qdrant() else "unreachable"
+        memory = "disabled" if not settings.memory_enabled else "unavailable"
+        if app.state.memory is not None:
+            memory = "ready" if await app.state.memory.ping() else "unreachable"
         return HealthResponse(
             status="ok",
             env=settings.app_env,
             version=API_VERSION,
             llm="ready" if app.state.llm is not None else "unavailable",
-            retrieval=(
-                "ready"
-                if app.state.retriever is not None
-                else ("disabled" if not app.state.grounded else "unavailable")
-            ),
-            memory=(
-                "ready"
-                if app.state.memory is not None
-                else ("disabled" if not settings.memory_enabled else "unavailable")
-            ),
+            retrieval=retrieval,
+            memory=memory,
         )
+
+    async def _reachable_qdrant() -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as client:
+                return (await client.get(f"{settings.qdrant_url}/readyz")).is_success
+        except httpx.HTTPError:
+            return False
 
     @app.post(
         "/v1/chat",

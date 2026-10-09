@@ -111,6 +111,18 @@ class ConversationStore:
                 "DELETE FROM messages WHERE chat_id = %s", (chat_id,)
             ).rowcount
 
+    def _ping(self) -> bool:
+        try:
+            with psycopg.connect(self._dsn, connect_timeout=1) as conn:
+                conn.execute("SELECT 1")
+            return True
+        except psycopg.Error:
+            return False
+
+    async def ping(self) -> bool:
+        """Does Postgres answer right now? For /healthz (Phase 13)."""
+        return await asyncio.to_thread(self._ping)
+
     async def recent(self, chat_id: int, limit: int) -> list[Message]:
         """The last `limit` messages of this chat, oldest first."""
         return await asyncio.to_thread(self._recent, chat_id, limit)

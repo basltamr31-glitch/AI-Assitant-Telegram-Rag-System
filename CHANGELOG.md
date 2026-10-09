@@ -6,6 +6,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 13] — 2026-10-09 — Failing well (awaiting review)
+
+**ADR-020** has the measurements and the retry table.
+
+### Fixed
+- With Qdrant down, the reply was "The model did not answer", after 82 s -
+  past n8n's timeout, so Telegram showed nothing. Now it says the knowledge
+  base is unavailable, the model is not asked to answer anyway, and the
+  failure itself takes 2 s, then nothing for the next 30 (a circuit breaker).
+- The first question after a restart spent 43 s loading the embedding
+  model; it now loads in the background at startup.
+
+### Added
+- Named errors with Arabic messages and the trace id
+  (`app/core/errors.py`): knowledge base down, model busy, quota spent (and
+  when it returns), request rejected.
+- Retries with backoff (3 s, 6 s) for overload only; never for a spent
+  quota, a rejected request or a timeout.
+- `OPENROUTER_FALLBACK_MODELS`, sent as OpenRouter's `models` list.
+- `/healthz` pings Qdrant and Postgres: `ready` or `unreachable`.
+- Durations in the logs: `llm.completion` and `retrieval.search`.
+- `RETRIEVAL_WARM_ON_START`; 13 tests, among them the exit criterion in
+  miniature.
+
+### Changed
+- The OpenRouter timeout is 75 s (was 120): two calls must fit in n8n's.
+- `QDRANT_URL` defaults to `127.0.0.1`.
+- `API_VERSION` is `0.13.0`.
+
+---
+
 ## [Phase 12] — 2026-10-08 — Security, and a threat model
 
 **`THREAT_MODEL.md`** is the deliverable: assets, trust boundaries, fourteen

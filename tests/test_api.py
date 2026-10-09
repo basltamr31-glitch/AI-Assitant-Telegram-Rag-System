@@ -331,6 +331,7 @@ def grounded_client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("RETRIEVAL_ENABLED", "true")
+    monkeypatch.setenv("RETRIEVAL_WARM_ON_START", "false")
     monkeypatch.setenv("MEMORY_ENABLED", "false")
     get_settings.cache_clear()
 
@@ -672,3 +673,22 @@ def test_too_many_messages_get_a_polite_refusal_not_silence(client: TestClient) 
     assert "دقيقة" in bodies[2]["reply"]
     # The limited message never reached the model.
     assert len(fake.calls) == 2
+
+
+# --- Phase 13: errors carry a trace id, and /healthz checks for real -------------
+
+
+def test_a_failure_in_telegram_can_be_found_in_the_log(client: TestClient) -> None:
+    client.app.state.llm = FakeLLM(fails=True)
+    response = post(client, text="سؤال")
+    trace_id = response.headers["X-Trace-Id"]
+    assert trace_id in response.json()["reply"]
+
+
+def test_healthz_reports_an_unreachable_dependency(client: TestClient) -> None:
+    class DownMemory:
+        async def ping(self) -> bool:
+            return False
+
+    client.app.state.memory = DownMemory()
+    assert client.get("/healthz").json()["memory"] == "unreachable"

@@ -183,6 +183,61 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-020 — Failing well: named errors, a breaker, and what is never retried
+
+**Date:** 2026-10-09 · **Status:** Accepted
+
+**Context.** Measured before any change, with Qdrant unreachable: the reply
+was "The model did not answer" - wrong, the model was fine - and it came
+after **82 seconds**, past n8n's 120 s budget minus the model's own time, so
+in Telegram the user would have seen nothing. The 82 s were 43 s of loading
+the embedding model on first use, and 4.6 s per refused connection, repeated
+for every search an agent turn made.
+
+### Decision 1 — Failures have names (`app/core/errors.py`)
+
+`KnowledgeBaseUnavailable`, `ModelUnavailable`, `QuotaExhausted`,
+`ModelRejected`. Each carries whether retrying can help and what the user
+should be told, in Arabic, with the trace id appended so a failure seen in
+Telegram is one search away in the log. An unnamed exception is a bug, and
+says so.
+
+### Decision 2 — Retry only what a retry can fix
+
+| Failure | Retried? | Why |
+|---|---|---|
+| 5xx, upstream 429, 200 with no `choices` | after 3 s, then 6 s | Overload clears in seconds; one second was too soon |
+| Connection failed before sending | same | Nothing was spent |
+| Daily quota (`free-models-per-day`) | no | It returns at midnight UTC, not in 3 s |
+| 400/401/402/404 | no | A key or model name is wrong; repeating it is wrong too |
+| Timeout (75 s) | no | A second minute would run past n8n's timeout |
+
+OpenRouter's own `models` list adds a **fallback model** inside the same
+request, so overload on one model does not cost a round trip to try another.
+
+### Decision 3 — A circuit breaker on the knowledge base
+
+After a Qdrant failure, the retriever fails instantly for 30 s instead of
+spending 2-4.6 s on each refused connection. The first call after the
+cooldown is tried for real, which is how it recovers from a restarted Qdrant
+without a restart of its own. Not retried: a local database that refused a
+connection will refuse the next one too.
+
+### Decision 4 — Health means "answers now"
+
+`/healthz` used to report what was constructed at startup - "ready" with
+Qdrant stopped. It now pings Qdrant and Postgres with a 1 s budget.
+
+**Also:** the embedder loads in a background thread at startup (37-43 s);
+Qdrant is addressed as `127.0.0.1`, since `localhost` tried IPv6 first.
+
+**Verified live** (the exit criterion): a question answered; Qdrant stopped;
+`/healthz` said `unreachable`; the follow-up said the knowledge base is
+unavailable; a greeting still worked; Qdrant started; after the cooldown the
+same follow-up was answered, with no restart.
+
+---
+
 ## ADR-019 — The MCP server: stdio, read-only, and the agent's own tools
 
 **Date:** 2026-10-08 · **Status:** Accepted (implements ADR-006)

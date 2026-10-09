@@ -7,6 +7,7 @@ job, with an eval set.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from app.llm.base import PRICING, LLMResult
@@ -174,7 +175,7 @@ def _openrouter_answering(
     import app.llm.openrouter_client as module
 
     # The real pause before a retry is seconds; a test has no overload to wait out.
-    monkeypatch.setattr(module, "_RETRY_DELAY_S", 0)
+    monkeypatch.setattr(module, "_RETRY_DELAYS_S", (0, 0))
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-a-real-key")
     get_settings.cache_clear()
     try:
@@ -185,7 +186,12 @@ def _openrouter_answering(
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json=bodies[len(calls) - 1])
+        reply = bodies[len(calls) - 1]
+        if isinstance(reply, Exception):
+            raise reply
+        # A dict is a 200 with that body; (status, body) is anything else.
+        status, body = reply if isinstance(reply, tuple) else (200, reply)
+        return httpx.Response(status, json=body)
 
     client._client = httpx.AsyncClient(
         base_url="https://openrouter.test", transport=httpx.MockTransport(handler)
@@ -209,12 +215,74 @@ def test_a_200_without_choices_is_retried_once(
     assert len(calls) == 2
 
 
-def test_two_answers_without_choices_fail_clearly(
+def test_three_answers_without_choices_fail_as_model_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import asyncio
 
-    client, calls = _openrouter_answering(monkeypatch, [NO_CHOICES, NO_CHOICES])
-    with pytest.raises(RuntimeError, match="no choices"):
+    from app.core.errors import ModelUnavailable
+
+    client, calls = _openrouter_answering(monkeypatch, [NO_CHOICES] * 3)
+    with pytest.raises(ModelUnavailable):
         asyncio.run(client.complete(system="s", user_message="q"))
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+# --- Phase 13: which failures are retried, and as what --------------------------
+
+QUOTA = (429, {"error": {"message": "Rate limit exceeded: free-models-per-day", "code": 429}})
+OVERLOADED = (503, {"error": {"message": "Service temporarily overloaded", "code": 503}})
+
+
+def test_an_overloaded_provider_is_retried_until_it_answers(monkeypatch) -> None:
+    import asyncio
+
+    client, calls = _openrouter_answering(monkeypatch, [OVERLOADED, OVERLOADED, ANSWER])
+    assert asyncio.run(client.complete(system="s", user_message="q")).text == "المادة 20"
+    assert len(calls) == 3
+
+
+def test_the_daily_quota_is_not_retried(monkeypatch) -> None:
+    """Retrying a spent quota only makes the user wait for the same no."""
+    import asyncio
+
+    from app.core.errors import QuotaExhausted
+
+    client, calls = _openrouter_answering(monkeypatch, [QUOTA, ANSWER])
+    with pytest.raises(QuotaExhausted):
+        asyncio.run(client.complete(system="s", user_message="q"))
+    assert len(calls) == 1
+
+
+def test_a_rejected_request_is_a_configuration_error(monkeypatch) -> None:
+    import asyncio
+
+    from app.core.errors import ModelRejected
+
+    client, calls = _openrouter_answering(monkeypatch, [(401, {"error": {"code": 401}}), ANSWER])
+    with pytest.raises(ModelRejected):
+        asyncio.run(client.complete(system="s", user_message="q"))
+    assert len(calls) == 1
+
+
+def test_a_timeout_is_not_repeated(monkeypatch) -> None:
+    """A minute already spent, spent again, runs past n8n's own timeout."""
+    import asyncio
+
+    from app.core.errors import ModelUnavailable
+
+    client, calls = _openrouter_answering(monkeypatch, [httpx.ReadTimeout("slow"), ANSWER])
+    with pytest.raises(ModelUnavailable):
+        asyncio.run(client.complete(system="s", user_message="q"))
+    assert len(calls) == 1
+
+
+def test_fallback_models_are_sent_for_openrouter_to_route(monkeypatch) -> None:
+    import asyncio
+    import json
+
+    monkeypatch.setenv("OPENROUTER_FALLBACK_MODELS", "backup/one:free, backup/two:free")
+    client, calls = _openrouter_answering(monkeypatch, [ANSWER])
+    asyncio.run(client.complete(system="s", user_message="q"))
+    sent = json.loads(calls[0].content)
+    assert sent["models"] == [sent["model"], "backup/one:free", "backup/two:free"]

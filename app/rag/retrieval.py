@@ -27,15 +27,21 @@ shows up as mediocre retrieval and nothing else.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 from app.config import get_settings
+from app.core.errors import KnowledgeBaseUnavailable
 from app.core.logging import get_logger
 from app.rag.embedder import LocalEmbedder
 from app.rag.normalise import normalise
 from app.rag.store import SearchResult, VectorStore
 
 log = get_logger(__name__)
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -84,12 +90,79 @@ class Retrieved:
 _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
+# Phase 13: how long to stop trying Qdrant after it fails. A refused
+# connection on Windows took 4.6 s to come back as an error, and an agent turn
+# can search several times - so without this, one stopped container cost the
+# user half a minute of waiting for the same answer each time.
+BREAKER_COOLDOWN_S = 30.0
+
+
 class Retriever:
     """Embeds a question, searches, and applies the threshold."""
 
+    def __init__(
+        self,
+        embedder: LocalEmbedder | None = None,
+        store: VectorStore | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        settings = get_settings()
+        self._embedder = embedder or LocalEmbedder()
+        self._store = store or VectorStore()
+        self._top_k = settings.retrieval_top_k
+        self._threshold = settings.retrieval_score_threshold
+        self._clock = clock
+        self._down_until = 0.0
+
+    # --- Phase 13: failing fast -------------------------------------------------
+
+    def _store_call(self, fn: Callable[[], T]) -> T:
+        """Run one store operation behind a circuit breaker.
+
+        Closed (the normal state): the call goes through. On any failure the
+        breaker opens for `BREAKER_COOLDOWN_S`, and every call in that time
+        fails at once with `KnowledgeBaseUnavailable`, without touching the
+        network. After the cooldown the next call is tried for real - which
+        is how the bot recovers from a restarted Qdrant with no restart of
+        its own.
+        """
+        if self._clock() < self._down_until:
+            raise KnowledgeBaseUnavailable("circuit open")
+        started = self._clock()
+        try:
+            return fn()
+        except Exception as exc:
+            self._down_until = self._clock() + BREAKER_COOLDOWN_S
+            log.error(
+                "retrieval.store_failed",
+                error=type(exc).__name__,
+                after_ms=round((self._clock() - started) * 1000),
+                cooldown_s=BREAKER_COOLDOWN_S,
+            )
+            raise KnowledgeBaseUnavailable(str(exc)) from exc
+
+    @property
+    def available(self) -> bool:
+        """False while the breaker is open - for /healthz."""
+        return self._clock() >= self._down_until
+
+    def warm(self) -> None:
+        """Load the embedding model now, not on the first question.
+
+        Measured: 43 s to load bge-m3 on this laptop. Left to the first
+        question after every restart, that plus the model's own 30 s ran
+        past n8n's timeout and the user got nothing. Called in a background
+        thread at startup.
+        """
+        started = self._clock()
+        self._embedder.embed_query("warm up")
+        log.info("retrieval.warm", seconds=round(self._clock() - started, 1))
+
+    # --- lookups -----------------------------------------------------------------
+
     def documents(self) -> dict[str, int]:
         """What the knowledge base holds: source file -> passage count."""
-        return self._store.documents()
+        return self._store_call(self._store.documents)
 
     def article(self, number: str | int) -> Retrieved:
         """The article with this number, looked up exactly (Phase 10).
@@ -99,20 +172,13 @@ class Retriever:
         """
         digits = str(number).strip().translate(_ARABIC_DIGITS)
         label = f"المادة {int(digits)}" if digits.isdigit() else ""
-        results = self._store.by_label(label, domain="legal") if label else []
+        results = (
+            self._store_call(lambda: self._store.by_label(label, domain="legal"))
+            if label
+            else []
+        )
         log.info("retrieval.article", label=label, returned=len(results))
         return Retrieved(query=label, results=results, threshold=1.0, rejected=[])
-
-    def __init__(
-        self,
-        embedder: LocalEmbedder | None = None,
-        store: VectorStore | None = None,
-    ) -> None:
-        settings = get_settings()
-        self._embedder = embedder or LocalEmbedder()
-        self._store = store or VectorStore()
-        self._top_k = settings.retrieval_top_k
-        self._threshold = settings.retrieval_score_threshold
 
     def retrieve(
         self,
@@ -145,15 +211,15 @@ class Retriever:
 
         # Search without a score filter, then apply the threshold here, so the
         # near-misses are available to log rather than discarded by the store.
+        started = self._clock()
+        vectors = [self._embedder.embed_query(q) for q in queries]
         searches = [
-            self._store.search(
-                self._embedder.embed_query(q),
-                limit=limit,
-                domain=domain,
-                source=source,
-                score_threshold=0.0,
+            self._store_call(
+                lambda v=v: self._store.search(
+                    v, limit=limit, domain=domain, source=source, score_threshold=0.0
+                )
             )
-            for q in queries
+            for v in vectors
         ]
         if len(searches) == 1:
             hits = searches[0]
@@ -180,6 +246,7 @@ class Retriever:
             rejected=len(rejected),
             best_score=round(hits[0].score, 3) if hits else None,
             threshold=cutoff,
+            duration_ms=round((self._clock() - started) * 1000),
         )
         return Retrieved(
             query=cleaned, results=kept, threshold=cutoff, rejected=rejected

@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # "low", "medium" or "high" for a reasoning model; empty leaves it to the
     # provider. Low keeps answers inside n8n's timeout: see openrouter_client.
     openrouter_reasoning_effort: str = "low"
+    # Tried by OpenRouter, in order, when the main model errors or is
+    # overloaded (Phase 13). Comma-separated; empty for none. Super drifts
+    # into Latin-script words more than Ultra (ADR-015 benchmark), but an
+    # answer with a stray French word beats no answer.
+    openrouter_fallback_models: str = "nvidia/nemotron-3-super-120b-a12b:free"
 
     # --- Ollama: a model running on this machine ------------------------------
     ollama_base_url: str = "http://localhost:11434"
@@ -150,7 +155,9 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 8
 
     # --- Qdrant ---------------------------------------------------------------
-    qdrant_url: str = "http://localhost:6333"
+    # 127.0.0.1, not localhost: on Windows, localhost tries IPv6 first, and a
+    # refused connection took 4.6 s to fail instead of failing at once.
+    qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_collection: str = "knowledge_base"
 
     # --- Retrieval (Phase 7-8) -------------------------------------------------
@@ -159,6 +166,9 @@ class Settings(BaseSettings):
     # and a deliberate operator choice rather than a silent fallback - an
     # unavailable knowledge base refuses instead of quietly inventing.
     retrieval_enabled: bool = True
+    # Load the embedding model at startup instead of on the first question
+    # (Phase 13). Off in tests, which never need the real model.
+    retrieval_warm_on_start: bool = True
 
     # --- Retrieval (Phase 7) --------------------------------------------------
     # How many passages a search returns before the threshold is applied.

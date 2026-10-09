@@ -34,9 +34,18 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Protocol
 
+import structlog
+
 from app.agent.loop import run_agent
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import markdown_emphasis, sanitise, truncate
+from app.core.errors import (
+    KnowledgeBaseUnavailable,
+    ModelRejected,
+    ModelUnavailable,
+    QuotaExhausted,
+    ServiceError,
+)
 from app.core.logging import get_logger
 from app.llm.base import LLMResult, Message
 from app.llm.prompts import (
@@ -302,6 +311,38 @@ async def _reset(memory: MemoryProtocol | None, chat_id: int) -> tuple[str, str]
     return RESET_DONE, "command.reset"
 
 
+# --- Phase 13: failing in a way the user can act on ---------------------------
+
+_HANDLED_BY = {
+    KnowledgeBaseUnavailable: "retrieval.error",
+    ModelUnavailable: "model.busy",
+    QuotaExhausted: "model.quota",
+    ModelRejected: "model.rejected",
+}
+
+
+def _failure(exc: Exception) -> tuple[str, str, list[str]]:
+    """Turn a failure into a reply that says what happened, and a trace id.
+
+    A named failure gets its own message: "the knowledge base is down" is
+    something to wait out, "today's quota is spent" says until when, and
+    neither is "the model did not answer". Anything else is a bug, logged
+    with its traceback. Either way the reply carries the trace id, so a
+    failure seen in Telegram can be found in the log in one search.
+    """
+    trace_id = structlog.contextvars.get_contextvars().get("trace_id", "")
+    if isinstance(exc, ServiceError):
+        log.warning("chat.dependency_failed", error=type(exc).__name__, detail=str(exc)[:200])
+        message = exc.user_message
+        handled_by = _HANDLED_BY.get(type(exc), "model.error")
+    else:
+        log.error("chat.unexpected_error", error=type(exc).__name__, exc_info=exc)
+        message, handled_by = MODEL_FAILED, "model.error"
+    if trace_id:
+        message += f"\n\n<i>رمز التتبع: <code>{trace_id}</code></i>"
+    return message, handled_by, []
+
+
 # --- Phase 10: the agent ------------------------------------------------------
 
 _CITED = re.compile(r"\[(\d+)\]")
@@ -354,9 +395,8 @@ async def _respond_with_agent(
             previous_question=_previous_question(history),
             max_rounds=max_rounds,
         )
-    except Exception:
-        log.exception("agent.failed")
-        return MODEL_FAILED, "model.error", []
+    except Exception as exc:  # noqa: BLE001 - _failure tells named from unexpected
+        return _failure(exc)
 
     result, evidence = outcome.result, outcome.evidence
 
@@ -455,9 +495,8 @@ async def respond(
     if not grounded:
         try:
             result = await _complete_in_script(llm, SYSTEM_PROMPT, text, history)
-        except Exception:
-            log.exception("llm.call_failed")
-            return MODEL_FAILED, "model.error", []
+        except Exception as exc:  # noqa: BLE001
+            return _failure(exc)
         reply, handled_by = _finish(_visible_answer(result), "model", result.stop_reason)
         if handled_by == "model":
             await _remember(memory, request, text, result.text)
@@ -477,9 +516,12 @@ async def respond(
 
     try:
         found = retriever.retrieve(text, context=_previous_question(history))
-    except Exception:
-        log.exception("retrieval.failed")
-        return KNOWLEDGE_BASE_UNAVAILABLE, "retrieval.error", []
+    except Exception as exc:  # noqa: BLE001
+        # Whatever went wrong inside retrieval, the knowledge base could not
+        # answer - so that is what the user is told.
+        if not isinstance(exc, KnowledgeBaseUnavailable):
+            exc = KnowledgeBaseUnavailable(str(exc))
+        return _failure(exc)
 
     if not found.found:
         # Deliberate: no passages means no answer. Answering anyway is the
@@ -495,12 +537,10 @@ async def respond(
     system = build_grounded_prompt(found.as_context())
     try:
         result = await _complete_in_script(llm, system, text, history)
-    except Exception:
-        # Deliberately broad, deliberately minimal. Retries, timeouts and
-        # fallbacks are Phase 13; today the only promise is that a failing
-        # model produces a message rather than silence.
-        log.exception("llm.call_failed")
-        return MODEL_FAILED, "model.error", []
+    except Exception as exc:  # noqa: BLE001
+        # Retries and the fallback model happened below, in the client; what
+        # arrives here has already been tried more than once.
+        return _failure(exc)
 
     citations = found.citations()
     # A bare "[1]" in the answer tells the reader nothing. Appending what the
