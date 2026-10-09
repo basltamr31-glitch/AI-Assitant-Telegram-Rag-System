@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 13] — 2026-10-09 — Failing well (awaiting review)
+## [Phase 13] — 2026-10-09 — Failing well
 
 **ADR-020** has the measurements and the retry table.
 

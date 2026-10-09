@@ -20,7 +20,7 @@ is explicitly approved.
 | **10** | Agent loop + tools; the model decides | Answers "hi" without searching; searches when it should | ✅ |
 | **11** | MCP server + client; second client (Claude Desktop) | A real tool call over MCP, end to end | ✅ |
 | **12** | Auth, validation, prompt injection, rate limits, secret-safe logging | A written threat model with mitigations | ✅ |
-| **13** | Retries, timeouts, fallbacks, structured errors, tracing | Kill Qdrant mid-conversation — the bot degrades gracefully | 🔵 |
+| **13** | Retries, timeouts, fallbacks, structured errors, tracing | Kill Qdrant mid-conversation — the bot degrades gracefully | ✅ |
 | **14** | Eval dataset, retrieval metrics, LLM-as-judge, injection tests | A score you can improve against | ⬜ |
 | **15** | Production Compose, HTTPS, backups, monitoring, pinned images | 🏁 **MILESTONE 3** — deployed and reachable | ⬜ |
 
