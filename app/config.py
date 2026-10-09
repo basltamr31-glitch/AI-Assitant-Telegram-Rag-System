@@ -224,7 +224,10 @@ class Settings(BaseSettings):
     postgres_user: str = "assistant"
     postgres_password: SecretStr = SecretStr("")
     postgres_db: str = "assistant"
-    postgres_host: str = "localhost"
+    # 127.0.0.1 for the same reason as Qdrant: measured, `localhost` took
+    # 3122 ms to connect and 127.0.0.1 took 34. Memory opens two connections
+    # per message, so this was ~6 s of every reply.
+    postgres_host: str = "127.0.0.1"
     postgres_port: int = 5432
 
     # --- Derived values -------------------------------------------------------
