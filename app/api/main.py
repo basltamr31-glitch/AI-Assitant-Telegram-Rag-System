@@ -42,7 +42,7 @@ from app.llm.client import create_llm_client
 from app.memory.store import ConversationStore
 from app.rag.retrieval import Retriever
 
-API_VERSION = "0.13.0"
+API_VERSION = "0.14.0"
 
 log = get_logger(__name__)
 
