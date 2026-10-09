@@ -190,9 +190,14 @@ Docker images are `:latest` and Python packages are lower-bounded only
 
 ## 5. Owner actions
 
+**Deferred (2026-10-09):** the owner accepted these risks for the
+development setup and will resolve them when the project moves to a real
+deployment. Phase 15 must not close while any of them is open.
+
 1. **n8n:** a strong password and MFA (T2).
 2. **Windows Firewall:** allow port 8000 only from Docker (T4).
-3. **Be aware of T10:** questions leave the machine.
+3. **T10:** questions leave the machine - choose a provider whose terms fit
+   the questions being asked.
 
 ## 6. Reviewing this document
 

@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 12] — 2026-10-08 — Security, and a threat model (awaiting review)
+## [Phase 12] — 2026-10-08 — Security, and a threat model
 
 **`THREAT_MODEL.md`** is the deliverable: assets, trust boundaries, fourteen
 threats, what was done about each and how it was checked.
