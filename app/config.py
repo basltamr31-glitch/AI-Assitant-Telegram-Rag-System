@@ -172,13 +172,23 @@ class Settings(BaseSettings):
 
     # --- Retrieval (Phase 7) --------------------------------------------------
     # How many passages a search returns before the threshold is applied.
-    retrieval_top_k: int = 5
+    # Phase 14, on the 31 answerable eval questions: recall 84% at 5, 87% at
+    # 8, 90% at 10. A penal-code article is ~230 characters, so ten of them
+    # are ~800 tokens - cheap for the two misses they recover.
+    retrieval_top_k: int = 10
     # Cosine similarity below which a passage is treated as not found. The
     # single most consequential number in the system: too low and the
     # assistant answers from near-misses, which is exactly how a grounded
-    # system learns to invent. Phase 14 tunes it against an eval set; until
-    # then it is a deliberate guess, stated rather than hidden.
-    retrieval_score_threshold: float = 0.45
+    # system learns to invent.
+    #
+    # Measured in Phase 14 (scripts/eval_retrieval.py), no longer guessed:
+    # from 0.45 to 0.50 recall does not move and the share of unanswerable
+    # questions that retrieve nothing rises from 33% to 50%. 0.55 loses one
+    # answerable question for 67%; 0.60 rejects everything unanswerable but
+    # loses four. The ranges overlap - the best wrong passage scores up to
+    # 0.58, the worst right one 0.51 - so no threshold separates them, and
+    # declining in-domain questions remains the grounding rules' job.
+    retrieval_score_threshold: float = 0.50
     # Characters of retrieved context passed to the model. A budget, not a
     # limit on the answer: more passages crowd out the question.
     retrieval_context_chars: int = 6000

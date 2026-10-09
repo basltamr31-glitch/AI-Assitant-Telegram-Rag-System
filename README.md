@@ -146,6 +146,17 @@ under `mcpServers`, with your own project path, and restart Claude Desktop:
 
 The server finds `.env` by itself, wherever the client starts it from.
 
+### Measuring it (Phase 14)
+
+```powershell
+# Retrieval only - free, run it after any change to chunking or settings.
+.venv\Scripts\python.exe scripts/eval_retrieval.py --show-misses
+
+# The real agent - spends quota, resumes where it stopped.
+.venv\Scripts\python.exe scripts/eval_answers.py --limit 10
+.venv\Scripts\python.exe scripts/eval_answers.py --summary
+```
+
 ## Documentation
 
 | File | Contents |

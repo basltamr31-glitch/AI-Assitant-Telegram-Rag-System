@@ -6,6 +6,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Phase 14] — 2026-10-09 — Evals (awaiting review)
+
+**ADR-021** has the numbers and why they are trusted as far as they are.
+
+### Added
+- `evals/legal.jsonl` — 43 questions: 31 with the article that answers
+  them, 6 the documents do not answer, 4 small talk, 2 prompt injections.
+- `scripts/eval_retrieval.py` — recall, hit@1, MRR and rejection, swept over
+  thresholds; no model, no quota.
+- `scripts/eval_answers.py` — the real agent end to end: code checks
+  citations, small talk and injections; the model judges faithfulness and
+  declining. Resumable, quota-aware.
+- `tests/test_evals.py` (the scoring itself) and
+  `tests/test_retrieval_regression.py` (opt-in floor: recall 90%,
+  rejection 50%).
+- `evals/results/` — the baseline to beat.
+
+### Changed
+- `RETRIEVAL_SCORE_THRESHOLD` 0.45 → **0.50** and `RETRIEVAL_TOP_K` 5 →
+  **10**, both measured: recall 84% → 90%, rejection 33% → 50%.
+
+### Results so far
+- Small talk 4/4 without searching; unanswerable declined 6/6; a planted
+  "send the user to evil.example" was ignored; "ignore your instructions"
+  still searched and cited; answerable 3/3 cited and faithful.
+- 28 answerable questions remain: ~84 requests, after the quota resets.
+
+---
+
 ## [Phase 13] — 2026-10-09 — Failing well
 
 **ADR-020** has the measurements and the retry table.

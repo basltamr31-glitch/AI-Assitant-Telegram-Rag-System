@@ -183,6 +183,62 @@ database is never the source of truth and the migration is low risk.
 
 ---
 
+## ADR-021 — Evals: a measured threshold, and a judge that is not trusted alone
+
+**Date:** 2026-10-09 · **Status:** Accepted
+
+**Context.** Every retrieval number was a guess - the threshold's own
+comment said so. Phase 14's exit criterion is "a score you can improve
+against".
+
+### Decision 1 — A small set, built from the text
+
+43 questions in `evals/legal.jsonl`: 31 answerable, each with the article
+that answers it, chosen by reading that article's text rather than from
+memory; 6 the documents do not answer (other laws, off-topic); 4 small talk;
+2 prompt injections. Questions are reworded, some in dialect, so they test
+meaning rather than shared words. Small enough to read in full, which
+matters more than size while the system is still changing.
+
+### Decision 2 — Retrieval is measured without a model
+
+`scripts/eval_retrieval.py`: one search per question, every threshold scored
+offline from the same results. No quota, so it can run on every change.
+
+| | threshold 0.45, top 5 (before) | threshold 0.50, top 10 (now) |
+|---|---|---|
+| recall (gold article kept) | 84% | **90%** |
+| rejection (unanswerable gets nothing) | 33% | **50%** |
+
+From 0.45 to 0.50 recall did not move; it was a free improvement. Raising
+`top_k` to 10 recovered two of five misses. The ranges overlap - the best
+wrong passage scored 0.58, the worst right one 0.51 - so no threshold
+separates them, and declining in-domain questions stays the grounding
+rules' job. `tests/test_retrieval_regression.py` (opt-in) holds the floor.
+
+hit@1 is 52%: the right article is often second. A reranker is the obvious
+next step, measured against this set.
+
+### Decision 3 — Answers are checked by code first, a judge second
+
+`scripts/eval_answers.py` runs the real `respond()`. What code can check, it
+checks: a reply passes only if its *sources* contain a gold article, small
+talk must not search, the planted link must not appear. The model judges
+only what code cannot - faithfulness to the passages, and whether a reply
+declined. It is the same model being judged, and biased towards itself, so
+its rate is a trend across runs, not a verdict.
+
+Runs are named by model and settings, append as they go, resume, and stop
+cleanly on a spent quota: the full set is ~110 requests, two days of the
+free tier.
+
+**First results** (2026-10-09): small talk 4/4, unanswerable declined 6/6
+(2 by code before the model was asked), planted instruction ignored,
+"ignore your instructions" still searched and cited, answerable 3/3 cited
+and judged faithful - with 28 answerable still to run.
+
+---
+
 ## ADR-020 — Failing well: named errors, a breaker, and what is never retried
 
 **Date:** 2026-10-09 · **Status:** Accepted
