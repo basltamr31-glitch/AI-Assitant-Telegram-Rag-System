@@ -19,6 +19,7 @@ import json
 import sys
 from pathlib import Path
 
+from app.advisors import get_registry
 from app.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.rag.boilerplate import strip_boilerplate
@@ -28,6 +29,8 @@ from app.rag.normalise import normalise
 from app.rag.store import VectorStore
 
 log = get_logger(__name__)
+
+MATERIAL = Path(__file__).resolve().parents[1] / "material"
 
 
 def load_cached_pages(cache_dir: Path) -> list[dict]:
@@ -59,6 +62,30 @@ def build_chunks(pages: list[dict], source: str, domain: str) -> list[Chunk]:
     return join_continuations(chunks)
 
 
+def resolve_advisors(document: str, given: list[str] | None) -> list[str]:
+    """Which advisors this book belongs to (Phase 15).
+
+    `--advisor` wins. Without it, the folder decides: a book kept at
+    `material/real_estate/<name>.pdf` belongs to `real_estate`. A book in
+    `material/` itself, with no `--advisor`, is refused rather than guessed -
+    filed under the wrong advisor, it would answer the wrong questions.
+    """
+    registry = get_registry()
+    if given:
+        unknown = [a for a in given if a not in registry.ids]
+        if unknown:
+            raise SystemExit(f"unknown advisor(s) {unknown}; known: {registry.ids}")
+        return given
+    found = sorted({p.parent.name for p in MATERIAL.glob(f"*/{document}.pdf")})
+    found = [a for a in found if a in registry.ids]
+    if found:
+        return found
+    raise SystemExit(
+        f"which advisor is '{document}' for? Pass --advisor (one of {registry.ids}), "
+        f"or keep the PDF in material/<advisor>/."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("document", help="cache directory name (the PDF's stem)")
@@ -72,6 +99,12 @@ def main() -> int:
         "--dry-run",
         action="store_true",
         help="chunk and report, but do not embed or store",
+    )
+    parser.add_argument(
+        "--advisor",
+        action="append",
+        help="advisor id this book belongs to; repeat for several. "
+        "Default: the material/<advisor>/ folder the PDF is in.",
     )
     args = parser.parse_args()
 
@@ -98,9 +131,13 @@ def main() -> int:
         page["text"] = text
 
     chunks = build_chunks(pages, source, args.domain)
+    advisors = resolve_advisors(args.document, args.advisor)
+    for chunk in chunks:
+        chunk.metadata["advisors"] = advisors
 
     print(f"document : {source}")
     print(f"domain   : {args.domain}")
+    print(f"advisors : {', '.join(advisors)}")
     print(f"pages    : {len(pages)} cached")
     print(f"chunks   : {len(chunks)}")
     if chunks:
@@ -123,6 +160,7 @@ def main() -> int:
     embedder = LocalEmbedder()
     store = VectorStore()
     store.ensure_collection(embedder.dimension)
+    store.ensure_advisor_index()
     # Clear this document's previous chunks first: new chunking or new
     # normalisation means new ids, and the old rows would otherwise stay
     # and keep matching searches.

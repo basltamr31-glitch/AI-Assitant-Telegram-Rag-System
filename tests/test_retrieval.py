@@ -38,9 +38,9 @@ class FakeStore:
         self.hits = hits
         self.calls: list[dict] = []
 
-    def search(self, vector, *, limit, domain=None, source=None, score_threshold=0.0):
+    def search(self, vector, *, limit, domain=None, source=None, advisor=None, score_threshold=0.0):
         self.calls.append(
-            {"limit": limit, "domain": domain, "source": source,
+            {"limit": limit, "domain": domain, "source": source, "advisor": advisor,
              "threshold": score_threshold}
         )
         return [h for h in self.hits if h.score >= score_threshold][:limit]
@@ -185,7 +185,7 @@ class ScriptedStore(FakeStore):
         super().__init__([])
         self.answers = list(answers)
 
-    def search(self, vector, *, limit, domain=None, source=None, score_threshold=0.0):
+    def search(self, vector, *, limit, domain=None, source=None, advisor=None, score_threshold=0.0):
         self.calls.append({"limit": limit})
         return self.answers.pop(0)[:limit]
 

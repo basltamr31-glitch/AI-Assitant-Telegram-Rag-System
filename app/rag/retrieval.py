@@ -160,11 +160,18 @@ class Retriever:
 
     # --- lookups -----------------------------------------------------------------
 
-    def documents(self) -> dict[str, int]:
-        """What the knowledge base holds: source file -> passage count."""
-        return self._store_call(self._store.documents)
+    def documents(self, advisor: str | None = None) -> dict[str, int]:
+        """What the knowledge base holds: source file -> passage count.
 
-    def article(self, number: str | int) -> Retrieved:
+        With `advisor`, only that advisor's books (Phase 15).
+        """
+        return self._store_call(lambda: self._store.documents(advisor))
+
+    def has_laws(self, advisor: str) -> bool:
+        """Whether this advisor has legal documents, so article lookup applies."""
+        return "legal" in self._store_call(lambda: self._store.domains_of(advisor))
+
+    def article(self, number: str | int, *, advisor: str | None = None) -> Retrieved:
         """The article with this number, looked up exactly (Phase 10).
 
         Chunk labels were written with Western digits (`المادة 535`), so an
@@ -173,7 +180,9 @@ class Retriever:
         digits = str(number).strip().translate(_ARABIC_DIGITS)
         label = f"المادة {int(digits)}" if digits.isdigit() else ""
         results = (
-            self._store_call(lambda: self._store.by_label(label, domain="legal"))
+            self._store_call(
+                lambda: self._store.by_label(label, domain="legal", advisor=advisor)
+            )
             if label
             else []
         )
@@ -185,6 +194,7 @@ class Retriever:
         query: str,
         *,
         context: str | None = None,
+        advisor: str | None = None,
         domain: str | None = None,
         source: str | None = None,
         top_k: int | None = None,
@@ -216,7 +226,12 @@ class Retriever:
         searches = [
             self._store_call(
                 lambda v=v: self._store.search(
-                    v, limit=limit, domain=domain, source=source, score_threshold=0.0
+                    v,
+                    limit=limit,
+                    domain=domain,
+                    source=source,
+                    advisor=advisor,
+                    score_threshold=0.0,
                 )
             )
             for v in vectors

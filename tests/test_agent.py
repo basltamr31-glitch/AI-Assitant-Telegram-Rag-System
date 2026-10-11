@@ -226,7 +226,7 @@ def test_get_article_looks_up_by_number_including_arabic_digits() -> None:
         def __init__(self):
             self.labels = []
 
-        def by_label(self, label, domain=None):
+        def by_label(self, label, domain=None, advisor=None):
             self.labels.append(label)
             return [passage(label)]
 

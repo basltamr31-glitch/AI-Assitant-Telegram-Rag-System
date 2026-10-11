@@ -109,7 +109,7 @@ class VectorStore:
             )
             # Filtering on an unindexed payload field works but scans; these
             # two are filtered on every query.
-            for field in ("domain", "source"):
+            for field in ("domain", "source", "advisors"):
                 self._client.create_payload_index(
                     collection_name=self.collection,
                     field_name=field,
@@ -181,6 +181,20 @@ class VectorStore:
         )
         log.info("store.source_cleared", source=source)
 
+    def _filter(self, **fields: str | None) -> models.Filter | None:
+        """`must` match every field given a value; None means "any".
+
+        `advisors` is a list in the payload; Qdrant's MatchValue on a list
+        matches when the list contains the value, which is exactly "this
+        book belongs to that advisor".
+        """
+        conditions = [
+            models.FieldCondition(key=key, match=models.MatchValue(value=value))
+            for key, value in fields.items()
+            if value
+        ]
+        return models.Filter(must=conditions) if conditions else None
+
     def search(
         self,
         vector: list[float],
@@ -188,41 +202,23 @@ class VectorStore:
         limit: int = 5,
         domain: str | None = None,
         source: str | None = None,
+        advisor: str | None = None,
         score_threshold: float = 0.0,
     ) -> list[SearchResult]:
         """Return the best matches above `score_threshold`, or nothing."""
-        conditions = []
-        if domain:
-            conditions.append(
-                models.FieldCondition(key="domain", match=models.MatchValue(value=domain))
-            )
-        if source:
-            conditions.append(
-                models.FieldCondition(key="source", match=models.MatchValue(value=source))
-            )
-
         hits = self._client.query_points(
             collection_name=self.collection,
             query=vector,
             limit=limit,
-            query_filter=models.Filter(must=conditions) if conditions else None,
+            query_filter=self._filter(domain=domain, source=source, advisors=advisor),
             score_threshold=score_threshold or None,
             with_payload=True,
         ).points
+        return [_result(hit.payload, hit.score) for hit in hits]
 
-        return [
-            SearchResult(
-                text=hit.payload.get("text", ""),
-                score=hit.score,
-                source=hit.payload.get("source", ""),
-                page=hit.payload.get("page", 0),
-                domain=hit.payload.get("domain", ""),
-                label=hit.payload.get("label", ""),
-            )
-            for hit in hits
-        ]
-
-    def by_label(self, label: str, *, domain: str | None = None) -> list[SearchResult]:
+    def by_label(
+        self, label: str, *, domain: str | None = None, advisor: str | None = None
+    ) -> list[SearchResult]:
         """Every chunk with exactly this label, e.g. `المادة 535`.
 
         An exact lookup, not a search: "what does Article 535 say?" has one
@@ -230,41 +226,76 @@ class VectorStore:
         happen to *sound* like 535 - 533 and 534 score almost as well. No
         score applies, so 1.0 stands for "this is the passage asked for".
 
+        Several laws can each have an Article 5; all are returned, each
+        citing its own source, and the model picks by the question.
+
         `label` has no payload index, so this scans. At a few thousand
         chunks that is milliseconds; the day it is not, index it.
         """
-        conditions = [models.FieldCondition(key="label", match=models.MatchValue(value=label))]
-        if domain:
-            conditions.append(
-                models.FieldCondition(key="domain", match=models.MatchValue(value=domain))
-            )
         points, _ = self._client.scroll(
             collection_name=self.collection,
-            scroll_filter=models.Filter(must=conditions),
+            scroll_filter=self._filter(label=label, domain=domain, advisors=advisor),
             limit=10,
             with_payload=True,
         )
-        return [
-            SearchResult(
-                text=p.payload.get("text", ""),
-                score=1.0,
-                source=p.payload.get("source", ""),
-                page=p.payload.get("page", 0),
-                domain=p.payload.get("domain", ""),
-                label=p.payload.get("label", ""),
-            )
-            for p in points
-        ]
+        return [_result(p.payload, 1.0) for p in points]
 
-    def documents(self) -> dict[str, int]:
-        """Every source document in the collection, with its chunk count.
+    def documents(self, advisor: str | None = None) -> dict[str, int]:
+        """Every source document, with its chunk count - optionally one advisor's.
 
         A facet over the indexed `source` field: Qdrant counts, nothing is
-        scanned on our side. Used by the MCP server so another client can
-        see what the knowledge base holds before searching it.
+        scanned on our side.
         """
-        hits = self._client.facet(self.collection, key="source", exact=True).hits
+        hits = self._client.facet(
+            self.collection,
+            key="source",
+            facet_filter=self._filter(advisors=advisor),
+            exact=True,
+        ).hits
         return {str(h.value): h.count for h in hits}
+
+    def domains_of(self, advisor: str) -> set[str]:
+        """Which kinds of document an advisor has - e.g. whether it has laws."""
+        hits = self._client.facet(
+            self.collection, key="domain", facet_filter=self._filter(advisors=advisor), exact=True
+        ).hits
+        return {str(h.value) for h in hits}
+
+    def advisors_of(self, source: str) -> list[str]:
+        """The advisors one document is assigned to (read from one chunk)."""
+        points, _ = self._client.scroll(
+            collection_name=self.collection,
+            scroll_filter=self._filter(source=source),
+            limit=1,
+            with_payload=["advisors"],
+        )
+        return list(points[0].payload.get("advisors") or []) if points else []
+
+    def set_advisors(self, source: str, advisors: list[str]) -> None:
+        """Assign a document to advisors - every chunk, no re-embedding.
+
+        A payload update: the vectors stay, so moving a 750-chunk law to
+        another advisor takes a second, not an ingestion.
+        """
+        self._client.set_payload(
+            collection_name=self.collection,
+            payload={"advisors": advisors},
+            points=models.FilterSelector(filter=self._filter(source=source)),
+            wait=True,
+        )
+        log.info("store.advisors_set", source=source, advisors=advisors)
+
+    def ensure_advisor_index(self) -> None:
+        """Index `advisors` - every search filters on it from Phase 15.
+
+        Safe to call on a collection that already has the index.
+        """
+        self._client.create_payload_index(
+            collection_name=self.collection,
+            field_name="advisors",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+            wait=True,
+        )
 
     def count(self, domain: str | None = None) -> int:
         """How many chunks are stored, optionally for one domain."""
@@ -280,3 +311,14 @@ class VectorStore:
         return self._client.count(
             collection_name=self.collection, count_filter=flt, exact=True
         ).count
+
+
+def _result(payload: dict, score: float) -> SearchResult:
+    return SearchResult(
+        text=payload.get("text", ""),
+        score=score,
+        source=payload.get("source", ""),
+        page=payload.get("page", 0),
+        domain=payload.get("domain", ""),
+        label=payload.get("label", ""),
+    )

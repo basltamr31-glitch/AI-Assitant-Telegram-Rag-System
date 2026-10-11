@@ -51,7 +51,7 @@ class FlakyStore:
             raise ConnectionRefusedError("[WinError 10061] actively refused")
         return [SearchResult("نص المادة 628", 0.7, "law.pdf", 99, "legal", "المادة 628")]
 
-    def by_label(self, label, domain=None):
+    def by_label(self, label, domain=None, advisor=None):
         return self.search(None)
 
 

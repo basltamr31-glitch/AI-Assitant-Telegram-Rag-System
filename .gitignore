@@ -21,6 +21,10 @@ htmlcov/
 # Learned by pushing a 118 MB textbook at GitHub's 100 MB limit.
 material/*
 !material/.gitkeep
+# Phase 15: one folder per advisor. Keep the folders, not the books.
+!material/*/
+material/*/*
+!material/*/.gitkeep
 data/documents/*
 !data/documents/.gitkeep
 data/exports/
