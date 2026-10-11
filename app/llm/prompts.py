@@ -83,26 +83,65 @@ and legal material in Arabic.
 
 # --- Phase 10: the agent decides when to look ---------------------------------
 
-AGENT_SYSTEM_PROMPT = f"""You are an assistant reached through Telegram. You
-answer from the user's own documents - the Syrian penal code and a Syrian
-school mathematics textbook - which you reach through tools.
+_AGENT_PROMPT = """You are "{name}", one of several advisors in one assistant
+reached through Telegram. Your subject: {description}
+
+You answer from these documents only, which you reach through tools:
+{documents}
 
 When to use the tools:
-- Greetings, thanks, and questions about what you can do: answer briefly and
-  directly, without tools.
-- Any question about law, crimes, punishments, articles, or the curriculum:
-  call a tool first, every time, even if you think you know the answer.
-- When the user names an article number, use get_article. Otherwise use
-  search_knowledge_base.
+- Greetings, thanks, and questions about what you can do: answer directly,
+  without tools, in three or four short lines - which advisor you are and
+  what your documents cover. No lists of examples: a longer answer is taken
+  for a factual one and checked against the documents.
+- Any question about your subject: call a tool first, every time, even if you
+  think you know the answer.{article_rule}
 - If the results do not answer the question, you may search once more with
   different words. Then answer from what you have.
+- A question that belongs to another specialty: say it is outside this
+  advisor's documents, and that the user can switch advisor from the
+  keyboard.
 - The tool results are the passages. Their numbers - [1], [2] - are the ones
   to cite.
 
-{FORMATTING}
+{formatting}
 
-{GROUNDING}
+{grounding}
 """
+
+_ARTICLE_RULE = """
+- When the user names an article number, use get_article. Otherwise use
+  search_knowledge_base."""
+
+
+def build_agent_prompt(
+    name: str, description: str, documents: list[str] | None, has_laws: bool
+) -> str:
+    """The agent's instructions for one advisor (Phase 15).
+
+    Before Phase 15 this named "the Syrian penal code and a school maths
+    textbook" in so many words - and a model told that its documents are
+    the penal code will tell a user asking about a history book that it
+    cannot help, without searching. Built from the registry and the
+    knowledge base instead, adding a book or an advisor changes no code.
+
+    `documents` is None when the knowledge base could not be asked: the
+    prompt still works, so a greeting is answered while Qdrant is down.
+    """
+    if documents is None:
+        listing = "- (the list is unavailable right now; search to find out)"
+    elif not documents:
+        listing = "- (none yet: this advisor has no documents)"
+    else:
+        listing = "\n".join(f"- {d}" for d in documents)
+    return _AGENT_PROMPT.format(
+        name=name,
+        description=description,
+        documents=listing,
+        article_rule=_ARTICLE_RULE if has_laws else "",
+        formatting=FORMATTING,
+        grounding=GROUNDING,
+    )
 
 
 def build_grounded_prompt(context: str) -> str:

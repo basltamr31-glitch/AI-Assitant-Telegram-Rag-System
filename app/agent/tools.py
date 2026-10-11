@@ -33,10 +33,10 @@ log = get_logger(__name__)
 SEARCH = ToolSpec(
     name="search_knowledge_base",
     description=(
-        "Search the user's own documents: the Syrian penal code (قانون العقوبات) "
-        "and a Syrian school mathematics textbook. Use it for any question about "
-        "law, crimes, punishments, or the curriculum - never answer those from "
-        "memory. Write the query in Arabic, as the key words of what is being "
+        "Search the documents listed in your instructions - the books of the "
+        "advisor the user chose. Use it for any question about their subject; "
+        "never answer those from memory. Write the query in Arabic, as the key "
+        "words of what is being "
         "asked; for a follow-up, include what it follows up on (not 'وإذا كان "
         "مسلحاً' but 'عقوبة السرقة مع حمل السلاح'). Returns numbered passages "
         "to cite, or NO_RESULTS."
@@ -53,10 +53,12 @@ SEARCH = ToolSpec(
 ARTICLE = ToolSpec(
     name="get_article",
     description=(
-        "Fetch one article of the Syrian penal code by its number, exactly. Use "
-        "it when the user names an article (المادة 535) - a search would return "
-        "neighbouring articles that merely sound similar. Returns the article "
-        "as a numbered passage, or NO_RESULTS if there is no such article."
+        "Fetch one article of a law by its number, exactly. Use it when the user "
+        "names an article (المادة 535) - a search would return neighbouring "
+        "articles that merely sound similar. If several of the laws have an "
+        "article with that number, all come back, each naming its law; answer "
+        "from the one the question is about. Returns numbered passages, or "
+        "NO_RESULTS if there is no such article."
     ),
     parameters={
         "type": "object",
@@ -68,6 +70,16 @@ ARTICLE = ToolSpec(
 )
 
 TOOLS = (SEARCH, ARTICLE)
+
+
+def tools_for(has_laws: bool) -> tuple[ToolSpec, ...]:
+    """The tools one advisor offers (Phase 15).
+
+    Article lookup only where there are articles to look up: offered to an
+    economics advisor, the model would sooner or later try "المادة 5" of a
+    textbook and get NO_RESULTS for a question it could have searched.
+    """
+    return TOOLS if has_laws else (SEARCH,)
 
 # A search query is a handful of key words. Anything longer is a model gone
 # wrong or a client probing, and every character costs embedding time on a
@@ -124,6 +136,7 @@ def execute(
     evidence: Evidence,
     *,
     context: str | None = None,
+    advisor: str | None = None,
     max_chars: int = 6000,
 ) -> str:
     """Run one tool call and return what the model will read.
@@ -137,13 +150,13 @@ def execute(
         query = str(call.arguments.get("query", "")).strip()[:MAX_QUERY_CHARS]
         if not query:
             return "ERROR: search_knowledge_base needs a non-empty 'query'."
-        found = retriever.retrieve(query, context=context)
+        found = retriever.retrieve(query, context=context, advisor=advisor)
         return evidence.add(found.results, max_chars)
     if call.name == ARTICLE.name:
         number = call.arguments.get("number")
         if number in (None, ""):
             return "ERROR: get_article needs an article 'number'."
-        found = retriever.article(number)
+        found = retriever.article(number, advisor=advisor)
         return evidence.add(found.results, max_chars)
     log.warning("agent.unknown_tool", tool=call.name)
     return f"ERROR: there is no tool called '{call.name}'. Use one of: " + ", ".join(

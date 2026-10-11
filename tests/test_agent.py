@@ -72,7 +72,7 @@ class FakeRetriever:
         self.searches.append((query, context))
         return SimpleNamespace(results=self.by_query.get(query, []))
 
-    def article(self, number):
+    def article(self, number, **kwargs):
         self.lookups.append(number)
         return SimpleNamespace(results=self.articles.get(str(number), []))
 
@@ -269,7 +269,7 @@ def test_tool_mistakes_are_reported_to_the_model_not_raised() -> None:
         ("أهلاً! كيف أساعدك؟", True),
         ("عقوبة القتل من 15 إلى 20 سنة.", False),
         ("المادة ٥٣٣ تعاقب على القتل.", False),
-        ("أ" * 400, False),
+        ("أ" * 800, False),
     ],
 )
 def test_what_counts_as_small_talk(text: str, small_talk: bool) -> None:
@@ -355,3 +355,15 @@ def test_an_overlong_search_query_is_cut() -> None:
     retriever = FakeRetriever()
     execute(ToolCall("1", "search_knowledge_base", {"query": "س" * 50_000}), retriever, Evidence())
     assert len(retriever.searches[0][0]) == MAX_QUERY_CHARS
+
+
+def test_an_introduction_naming_its_own_book_is_small_talk() -> None:
+    """The live misfire: "what can you do?" answered, then thrown away for "1949"."""
+    intro = (
+        "أنا المستشار القانوني. أجيب من قانون العقوبات السوري لعام 1949 "
+        "(Syria-Penal-Cade-1949-Arabic.pdf)، مع ذكر المادة التي أستند إليها. "
+        "اسألني عن جريمة أو عقوبة."
+    )
+    assert looks_like_small_talk(intro, ["Syria-Penal-Cade-1949-Arabic.pdf"])
+    # A penalty is still a figure, wherever it appears.
+    assert not looks_like_small_talk("أنا المستشار القانوني. عقوبة القتل 15 سنة.", ["x.pdf"])

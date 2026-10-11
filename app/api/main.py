@@ -32,6 +32,7 @@ import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.advisors import get_registry
 from app.api.ratelimit import SlidingWindowLimiter
 from app.api.responder import RATE_LIMITED, respond
 from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
@@ -245,6 +246,9 @@ def create_app() -> FastAPI:
             history_chars=settings.memory_max_chars,
             agent=settings.agent_enabled,
             agent_max_rounds=settings.agent_max_rounds,
+            # Step 2 of Phase 15: everyone gets the default advisor until the
+            # keyboard lets a chat choose (step 3).
+            advisor=get_registry().default,
         )
 
         log.info(

@@ -58,7 +58,7 @@ server = MCPServer(
     # The SDK logs every HTTP request at INFO through its own handler; to a
     # client that forwards stderr, that is a screen of noise per question.
     log_level="WARNING",
-    title="Arabic knowledge base: Syrian penal code and maths curriculum",
+    title="Arabic knowledge base: every advisor's books",
     instructions=(
         "Search the user's own Arabic documents. Answer only from what the "
         "tools return, cite the passage numbers they give, and when a tool "
@@ -112,7 +112,7 @@ def documents() -> str:
 @server.resource(
     "kb://article/{number}",
     name="article",
-    description="One article of the Syrian penal code, by number.",
+    description="One article of a law in the knowledge base, by number.",
     mime_type="text/plain",
 )
 def article(number: str) -> str:

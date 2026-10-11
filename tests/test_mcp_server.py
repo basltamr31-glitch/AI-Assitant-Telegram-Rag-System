@@ -36,7 +36,7 @@ class FakeRetriever:
         hits = [passage("المادة 533"), passage("المادة 535")] if "القتل" in query else []
         return SimpleNamespace(results=hits)
 
-    def article(self, number):
+    def article(self, number, **kwargs):
         found = [passage(f"المادة {int(number)}")] if int(number) < 800 else []
         return SimpleNamespace(results=found)
 

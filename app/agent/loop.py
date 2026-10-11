@@ -38,10 +38,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from app.agent.tools import TOOLS, Evidence, execute
+from app.advisors import Advisor, get_registry
+from app.agent.tools import Evidence, execute, tools_for
 from app.core.logging import get_logger
 from app.llm.base import LLMResult, Message, ToolCall, ToolSpec, ToolStep
-from app.llm.prompts import AGENT_SYSTEM_PROMPT
+from app.llm.prompts import build_agent_prompt
 from app.rag.quality import drop_foreign_sentences, foreign_characters
 from app.rag.retrieval import Retriever
 
@@ -49,8 +50,17 @@ log = get_logger(__name__)
 
 # Rule 2. Small talk is short and has no figures in it; a penalty, an article
 # number or a worked answer has digits almost by definition.
-SMALL_TALK_MAX_CHARS = 300
+#
+# Two exceptions, from a misfire measured live in Phase 15: asked "what can
+# you do?", the legal advisor introduced itself and its book - 506
+# characters, naming `Syria-Penal-Cade-1949-Arabic.pdf` - and the rule threw
+# that answer away for its length and its "1949", searched, and refused. So
+# an introduction may run longer, and the advisor's own document names and
+# four-digit years are not figures in this sense. Penalties ("15 إلى 20
+# سنة") and article numbers ("المادة 533") still are.
+SMALL_TALK_MAX_CHARS = 700
 _DIGIT = re.compile(r"[0-9٠-٩]")
+_YEAR = re.compile(r"(?<![0-9٠-٩])(?:1[89]|20|١[٨٩]|٢٠)[0-9٠-٩]{2}(?![0-9٠-٩])")
 
 
 class ToolCapableLLM(Protocol):
@@ -74,8 +84,13 @@ class AgentResult:
     forced_search: bool
 
 
-def looks_like_small_talk(text: str) -> bool:
-    return len(text) <= SMALL_TALK_MAX_CHARS and not _DIGIT.search(text)
+def looks_like_small_talk(text: str, documents: Sequence[str] = ()) -> bool:
+    if len(text) > SMALL_TALK_MAX_CHARS:
+        return False
+    for name in documents:
+        # The name as listed, and its stem - the model may drop ".pdf".
+        text = text.replace(name, "").replace(name.rsplit(".", 1)[0], "")
+    return not _DIGIT.search(_YEAR.sub("", text))
 
 
 async def run_agent(
@@ -87,15 +102,27 @@ async def run_agent(
     previous_question: str | None = None,
     max_rounds: int = 3,
     context_chars: int = 6000,
+    advisor: Advisor | None = None,
+    documents: list[str] | None = None,
+    has_laws: bool = True,
 ) -> AgentResult:
+    """One agent turn, inside one advisor's books (Phase 15).
+
+    `advisor` None searches everything - what the tests and evals written
+    before Phase 15 expect.
+    """
     evidence = Evidence()
     steps: list[ToolStep] = []
+    scope = advisor.id if advisor else None
+    named = advisor or get_registry().default
+    system = build_agent_prompt(named.name, named.description, documents, has_laws)
+    tools = tools_for(has_laws)
 
     async def ask(allow_tools: bool) -> LLMResult:
         return await llm.complete_with_tools(
-            AGENT_SYSTEM_PROMPT,
+            system,
             text,
-            tools=TOOLS,
+            tools=tools,
             steps=steps,
             history=history,
             allow_tools=allow_tools,
@@ -103,7 +130,9 @@ async def run_agent(
 
     def run(calls: Sequence[ToolCall], context: str | None = None) -> None:
         results = tuple(
-            execute(c, retriever, evidence, context=context, max_chars=context_chars)
+            execute(
+                c, retriever, evidence, context=context, advisor=scope, max_chars=context_chars
+            )
             for c in calls
         )
         steps.append(ToolStep(calls=tuple(calls), results=results))
@@ -121,7 +150,7 @@ async def run_agent(
 
     # Rule 2.
     forced = False
-    if not evidence.searched and not looks_like_small_talk(result.text):
+    if not evidence.searched and not looks_like_small_talk(result.text, documents or ()):
         log.warning("agent.answered_without_evidence", chars=len(result.text))
         forced = True
         run(

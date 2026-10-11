@@ -36,6 +36,7 @@ from typing import Protocol
 
 import structlog
 
+from app.advisors import Advisor
 from app.agent.loop import run_agent
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import markdown_emphasis, sanitise, truncate
@@ -369,6 +370,30 @@ def _articles_named(answer: str, passages: list) -> list[int]:
     return named
 
 
+EMPTY_ADVISOR = (
+    "📭 <b>{name} لا يحتوي على كتب بعد.</b>\n\n"
+    "لا أستطيع الإجابة قبل إضافة مراجعه. يمكنك اختيار اختصاص آخر من لوحة المفاتيح."
+)
+
+
+def _library(retriever, advisor: Advisor | None) -> tuple[list[str] | None, bool]:
+    """An advisor's documents, and whether any of them is a law.
+
+    Asked of the knowledge base on every turn - a facet, milliseconds - so a
+    book added or reassigned is seen at once, without a restart. If the
+    knowledge base cannot be asked, the agent still runs with the list
+    marked unknown: a greeting must not fail because Qdrant is down.
+    """
+    if advisor is None:
+        return None, True
+    try:
+        documents = sorted(retriever.documents(advisor.id))
+        return documents, retriever.has_laws(advisor.id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("advisor.library_unavailable", advisor=advisor.id, error=type(exc).__name__)
+        return None, True
+
+
 async def _respond_with_agent(
     request: ChatRequest,
     llm,
@@ -377,6 +402,7 @@ async def _respond_with_agent(
     history: list[Message],
     memory: MemoryProtocol | None,
     max_rounds: int,
+    advisor: Advisor | None = None,
 ) -> tuple[str, str, list[str]]:
     """Let the model decide whether to look; enforce what it found.
 
@@ -386,6 +412,7 @@ async def _respond_with_agent(
     passage that was actually retrieved: `[7]` when four passages came back
     is removed, not shown as if it could be checked.
     """
+    documents, has_laws = _library(retriever, advisor)
     try:
         outcome = await run_agent(
             llm,
@@ -394,6 +421,9 @@ async def _respond_with_agent(
             history,
             previous_question=_previous_question(history),
             max_rounds=max_rounds,
+            advisor=advisor,
+            documents=documents,
+            has_laws=has_laws,
         )
     except Exception as exc:  # noqa: BLE001 - _failure tells named from unexpected
         return _failure(exc)
@@ -403,6 +433,9 @@ async def _respond_with_agent(
     if evidence.searched and not evidence.passages:
         log.info("agent.nothing_found", rounds=outcome.rounds)
         await _remember(memory, request, text, REMEMBERED_REFUSAL)
+        if documents == [] and advisor is not None:
+            # Not "nothing matched": there is nothing to match yet.
+            return EMPTY_ADVISOR.format(name=advisor.name), "agent.empty_advisor", []
         return NOTHING_FOUND, "agent.nothing_found", []
 
     if not evidence.searched:
@@ -460,6 +493,7 @@ async def respond(
     history_chars: int = 6000,
     agent: bool = False,
     agent_max_rounds: int = 3,
+    advisor: Advisor | None = None,
 ) -> tuple[str, str, list[str]]:
     """Return `(reply_html, handled_by, citations)` for one message.
 
@@ -511,11 +545,15 @@ async def respond(
     # also what AGENT_ENABLED=false brings back.
     if agent and hasattr(llm, "complete_with_tools"):
         return await _respond_with_agent(
-            request, llm, retriever, text, history, memory, agent_max_rounds
+            request, llm, retriever, text, history, memory, agent_max_rounds, advisor
         )
 
     try:
-        found = retriever.retrieve(text, context=_previous_question(history))
+        found = retriever.retrieve(
+            text,
+            context=_previous_question(history),
+            advisor=advisor.id if advisor else None,
+        )
     except Exception as exc:  # noqa: BLE001
         # Whatever went wrong inside retrieval, the knowledge base could not
         # answer - so that is what the user is told.
