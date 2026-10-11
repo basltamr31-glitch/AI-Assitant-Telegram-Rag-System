@@ -5,7 +5,7 @@ it. Every threat names what was done about it, whether that is finished, and
 how it was checked - a mitigation nobody verified is a hope.
 
 **Date:** 2026-10-08 · **Scope:** the development deployment as it runs today
-- one owner, one Windows laptop, Docker Compose, an ngrok tunnel. Phase 15's
+- one owner, one Windows laptop, Docker Compose, an ngrok tunnel. Phase 16's
 production deployment gets its own review.
 
 ---
@@ -184,7 +184,7 @@ stripped, unclosed tags closed, everything else escaped
 Docker images are `:latest` and Python packages are lower-bounded only
 (ADR-009). A compromised or broken upstream release would be pulled in.
 
-**Mitigation:** deferred to Phase 15, which pins both.
+**Mitigation:** deferred to Phase 16, which pins both.
 
 ---
 
@@ -192,7 +192,7 @@ Docker images are `:latest` and Python packages are lower-bounded only
 
 **Deferred (2026-10-09):** the owner accepted these risks for the
 development setup and will resolve them when the project moves to a real
-deployment. Phase 15 must not close while any of them is open.
+deployment. Phase 16 must not close while any of them is open.
 
 1. **n8n:** a strong password and MFA (T2).
 2. **Windows Firewall:** allow port 8000 only from Docker (T4).

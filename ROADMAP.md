@@ -21,8 +21,13 @@ is explicitly approved.
 | **11** | MCP server + client; second client (Claude Desktop) | A real tool call over MCP, end to end | ✅ |
 | **12** | Auth, validation, prompt injection, rate limits, secret-safe logging | A written threat model with mitigations | ✅ |
 | **13** | Retries, timeouts, fallbacks, structured errors, tracing | Kill Qdrant mid-conversation — the bot degrades gracefully | ✅ |
-| **14** | Eval dataset, retrieval metrics, LLM-as-judge, injection tests | A score you can improve against | 🔵 |
-| **15** | Production Compose, HTTPS, backups, monitoring, pinned images | 🏁 **MILESTONE 3** — deployed and reachable | ⬜ |
+| **14** | Eval dataset, retrieval metrics, LLM-as-judge, injection tests | A score you can improve against | ✅ |
+| **15** | Multiple advisors: one bot, one RAG engine, a Telegram keyboard to choose the specialty (legal, real estate, economic, companies) | Switch advisor in Telegram; each answers only from its own books, with its own memory | 🔵 |
+| **16** | Production Compose, HTTPS, backups, monitoring, pinned images | 🏁 **MILESTONE 3** — deployed and reachable | ⬜ |
+
+> **Renumbered 2026-10-11.** Multiple advisors was added as Phase 15, before
+> deployment, so the deployed system is the final shape. ADRs written before
+> that date say "Phase 15" for deployment; read it as Phase 16.
 
 ## Milestones
 
@@ -35,7 +40,7 @@ Deliberate: once the plumbing is solid and observable, every later phase is
 from your documents, cites sources, and says "I don't know" when the knowledge
 base does not contain the answer.
 
-**Milestone 3 — deployed (end of Phase 15).** Running on a server, over HTTPS,
+**Milestone 3 — deployed (end of Phase 16).** Running on a server, over HTTPS,
 with backups and monitoring.
 
 ## Open questions

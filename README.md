@@ -162,7 +162,7 @@ The server finds `.env` by itself, wherever the client starts it from.
 | File | Contents |
 |---|---|
 | `ARCHITECTURE.md` | System design, layers, data flow |
-| `ROADMAP.md` | 16 phases, deliverables, status |
+| `ROADMAP.md` | 17 phases, deliverables, status |
 | `DECISIONS.md` | Architecture decision records - what and why |
 | `THREAT_MODEL.md` | What is protected, from whom, and how - with owner actions |
 | `LEARNING.md` | Concept glossary, phase by phase |
@@ -170,6 +170,6 @@ The server finds `.env` by itself, wherever the client starts it from.
 
 ## Project status
 
-Phases 0-13 complete. Milestones 1 and 2 reached: the
+Phases 0-14 complete. Milestones 1 and 2 reached: the
 bot answers from the Syrian penal code with citations, remembers the
 conversation, and decides for itself when to search. See `ROADMAP.md`.

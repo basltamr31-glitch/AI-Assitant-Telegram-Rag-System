@@ -6,7 +6,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Phase 14] — 2026-10-09 — Evals (awaiting review)
+## [Phase 14] — 2026-10-09 — Evals
 
 **ADR-021** has the numbers and why they are trusted as far as they are.
 
