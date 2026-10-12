@@ -59,3 +59,24 @@ def test_clear_removes_only_that_chat(store: ConversationStore) -> None:
     finally:
         asyncio.run(store.clear(mine))
         asyncio.run(store.clear(other))
+
+
+def test_each_advisor_has_its_own_history_and_the_choice_survives(store: ConversationStore) -> None:
+    """Phase 15: one chat, two advisors, two conversations - and a new store sees the choice."""
+    chat = -random.randint(10**12, 10**13)
+    try:
+        asyncio.run(store.append(chat, 1, [Message("user", "سرقة"), Message("assistant", "ج")], "legal"))
+        asyncio.run(store.append(chat, 1, [Message("user", "إيجار"), Message("assistant", "ج")], "real_estate"))
+        asyncio.run(store.set_advisor(chat, "real_estate"))
+
+        reopened = ConversationStore(get_settings().postgres_dsn)
+        assert [m.content for m in asyncio.run(reopened.recent(chat, 10, "legal"))] == ["سرقة", "ج"]
+        assert [m.content for m in asyncio.run(reopened.recent(chat, 10, "real_estate"))] == ["إيجار", "ج"]
+        assert asyncio.run(reopened.get_advisor(chat)) == "real_estate"
+
+        assert asyncio.run(store.clear(chat, "real_estate")) == 2
+        assert len(asyncio.run(store.recent(chat, 10, "legal"))) == 2
+    finally:
+        asyncio.run(store.clear(chat))
+        with psycopg.connect(get_settings().postgres_dsn) as conn:
+            conn.execute("DELETE FROM chat_advisor WHERE chat_id = %s", (chat,))

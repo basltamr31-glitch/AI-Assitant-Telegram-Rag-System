@@ -315,10 +315,12 @@ class FakeRetriever:
         self.fails = fails
         self.queries: list[str] = []
         self.contexts: list[str | None] = []
+        self.advisors: list[str | None] = []
 
     def retrieve(self, query: str, **kwargs):
         self.queries.append(query)
         self.contexts.append(kwargs.get("context"))
+        self.advisors.append(kwargs.get("advisor"))
         if self.fails:
             raise RuntimeError("qdrant is down")
         return FakeRetrieved(self.passages)
@@ -497,21 +499,36 @@ class FakeMemory:
     """An in-memory stand-in for ConversationStore."""
 
     def __init__(self, fails: bool = False) -> None:
-        self.rows: dict[int, list] = {}
+        # Keyed by chat, or by (chat, advisor) once an advisor is given -
+        # so tests from before Phase 15 still read `rows[chat_id]`.
+        self.rows: dict = {}
+        self.chosen: dict[int, str] = {}
         self.fails = fails
 
-    async def recent(self, chat_id: int, limit: int):
+    @staticmethod
+    def _key(chat_id: int, advisor: str | None):
+        return chat_id if advisor is None else (chat_id, advisor)
+
+    async def recent(self, chat_id: int, limit: int, advisor: str | None = None):
         if self.fails:
             raise RuntimeError("postgres is down")
-        return self.rows.get(chat_id, [])[-limit:]
+        return self.rows.get(self._key(chat_id, advisor), [])[-limit:]
 
-    async def append(self, chat_id: int, user_id: int, turns) -> None:
+    async def append(self, chat_id: int, user_id: int, turns, advisor: str | None = None) -> None:
         if self.fails:
             raise RuntimeError("postgres is down")
-        self.rows.setdefault(chat_id, []).extend(turns)
+        self.rows.setdefault(self._key(chat_id, advisor), []).extend(turns)
 
-    async def clear(self, chat_id: int) -> int:
-        return len(self.rows.pop(chat_id, []))
+    async def clear(self, chat_id: int, advisor: str | None = None) -> int:
+        return len(self.rows.pop(self._key(chat_id, advisor), []))
+
+    async def get_advisor(self, chat_id: int) -> str | None:
+        return self.chosen.get(chat_id)
+
+    async def set_advisor(self, chat_id: int, advisor: str) -> None:
+        if self.fails:
+            raise RuntimeError("postgres is down")
+        self.chosen[chat_id] = advisor
 
 
 THEFT = "ما عقوبة السرقة؟"
@@ -564,7 +581,7 @@ def test_remembered_answers_lose_their_citation_numbers(
 
     post(grounded_client, text=THEFT)
 
-    assert memory.rows[1][1].content == "الحبس والغرامة."
+    assert memory.rows[(1, "legal")][1].content == "الحبس والغرامة."
 
 
 def test_a_refusal_is_remembered_as_a_refusal(grounded_client: TestClient) -> None:
@@ -575,8 +592,8 @@ def test_a_refusal_is_remembered_as_a_refusal(grounded_client: TestClient) -> No
 
     post(grounded_client, text="كيكة الشوكولا")
 
-    assert [m.role for m in memory.rows[1]] == ["user", "assistant"]
-    assert "لم أجد" in memory.rows[1][1].content
+    assert [m.role for m in memory.rows[(1, "legal")]] == ["user", "assistant"]
+    assert "لم أجد" in memory.rows[(1, "legal")][1].content
 
 
 def test_a_failed_answer_is_not_remembered(grounded_client: TestClient) -> None:
@@ -692,3 +709,87 @@ def test_healthz_reports_an_unreachable_dependency(client: TestClient) -> None:
 
     client.app.state.memory = DownMemory()
     assert client.get("/healthz").json()["memory"] == "unreachable"
+
+
+# --- Phase 15: choosing an advisor from the keyboard ------------------------------
+
+REAL_ESTATE = "🏠 المستشار العقاري"
+
+
+def test_every_reply_carries_the_advisor_keyboard(grounded_client: TestClient) -> None:
+    body = post(grounded_client, text="/ping").json()
+    assert body["keyboard"] == [
+        ["⚖️ المستشار القانوني", "🏠 المستشار العقاري"],
+        ["📈 المستشار الاقتصادي", "🏢 مستشار الشركات"],
+    ]
+
+
+def test_pressing_a_button_switches_and_the_next_question_goes_to_that_advisor(
+    grounded_client: TestClient,
+) -> None:
+    memory, retriever = _with_memory(grounded_client, FakeLLM(text="جواب [1]."))
+
+    switched = post(grounded_client, text=REAL_ESTATE).json()
+    post(grounded_client, text="ما شروط عقد الإيجار؟")
+
+    assert switched["handled_by"] == "command.switch"
+    assert "المستشار العقاري" in switched["reply"]
+    assert memory.chosen[1] == "real_estate"
+    # The button itself was not searched for; the question was, in real estate.
+    assert retriever.queries == ["ما شروط عقد الإيجار؟"]
+    assert retriever.advisors == ["real_estate"]
+
+
+def test_each_advisor_keeps_its_own_conversation(grounded_client: TestClient) -> None:
+    fake = FakeLLM(text="جواب [1].")
+    memory, _ = _with_memory(grounded_client, fake)
+
+    post(grounded_client, text=THEFT)  # legal, the default
+    post(grounded_client, text=REAL_ESTATE)
+    post(grounded_client, text="ما شروط عقد الإيجار؟")
+    post(grounded_client, text="⚖️ المستشار القانوني")
+    post(grounded_client, text=ARMED)
+
+    # The real-estate question saw no theft; the legal follow-up saw theft
+    # and nothing about rent.
+    assert fake.histories[1] == []
+    assert [m.content for m in fake.histories[2] if m.role == "user"] == [THEFT]
+    assert len(memory.rows[(1, "legal")]) == 4
+    assert len(memory.rows[(1, "real_estate")]) == 2
+
+
+def test_reset_forgets_only_the_current_advisor(grounded_client: TestClient) -> None:
+    memory, _ = _with_memory(grounded_client, FakeLLM(text="جواب [1]."))
+    post(grounded_client, text=THEFT)
+    post(grounded_client, text=REAL_ESTATE)
+    post(grounded_client, text="ما شروط عقد الإيجار؟")
+
+    body = post(grounded_client, text="/reset").json()
+
+    assert "المستشار العقاري" in body["reply"]
+    assert (1, "real_estate") not in memory.rows
+    assert len(memory.rows[(1, "legal")]) == 2
+
+
+def test_an_advisor_that_cannot_be_saved_says_so(grounded_client: TestClient) -> None:
+    grounded_client.app.state.memory = FakeMemory(fails=True)
+    body = post(grounded_client, text=REAL_ESTATE).json()
+    assert body["handled_by"] == "command.switch"
+    assert "لم أتمكن من حفظ اختيارك" in body["reply"]
+
+
+def test_a_stored_advisor_that_no_longer_exists_falls_back_to_the_default(
+    grounded_client: TestClient,
+) -> None:
+    memory, retriever = _with_memory(grounded_client, FakeLLM(text="جواب [1]."))
+    memory.chosen[1] = "astrology"
+    post(grounded_client, text=THEFT)
+    assert retriever.advisors == ["legal"]
+
+
+def test_the_advisors_command_names_the_current_one(grounded_client: TestClient) -> None:
+    memory, _ = _with_memory(grounded_client, FakeLLM())
+    memory.chosen[1] = "economic"
+    body = post(grounded_client, text="/advisors").json()
+    assert body["handled_by"] == "command.advisors"
+    assert "أنت الآن مع: 📈" in body["reply"]

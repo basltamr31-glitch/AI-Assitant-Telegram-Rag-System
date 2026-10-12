@@ -36,7 +36,7 @@ from typing import Protocol
 
 import structlog
 
-from app.advisors import Advisor
+from app.advisors import Advisor, get_registry
 from app.agent.loop import run_agent
 from app.api.schemas import ChatRequest
 from app.api.telegram_html import markdown_emphasis, sanitise, truncate
@@ -62,7 +62,8 @@ log = get_logger(__name__)
 
 WELCOME = (
     "👋 <b>Hello {name}!</b>\n\n"
-    "اسألني عن مادتك وسأجيب <b>من مستنداتك أنت</b>، مع الإشارة إلى المصدر.\n\n"
+    "اختر مستشاراً من لوحة المفاتيح أسفل الشاشة، ثم اسأله. "
+    "كل مستشار يجيب <b>من كتبه هو</b>، مع الإشارة إلى المصدر.\n\n"
     "إن لم أجد ما يدعم الإجابة، سأقول ذلك بدل أن أخمّن.\n\n"
     "جرّب <code>/help</code> للأوامر."
 )
@@ -73,12 +74,23 @@ HELP = (
     "<code>/help</code> — this list\n"
     "<code>/ping</code> — check I am awake\n"
     "<code>/whoami</code> — the ids I see for you\n"
-    "<code>/reset</code> — forget this conversation and start fresh\n\n"
-    "<b>أي سؤال آخر</b> يُبحث عنه في مستنداتك أولاً.\n\n"
-    "<i>أتذكّر آخر رسائل هذه المحادثة، فيمكنك أن تسأل سؤال متابعة.</i>"
+    "<code>/advisors</code> — the advisors, and which one you are talking to\n"
+    "<code>/reset</code> — forget the conversation with the current advisor\n\n"
+    "<b>أي سؤال آخر</b> يُبحث عنه في كتب المستشار الحالي.\n\n"
+    "<i>أتذكّر آخر رسائل المحادثة مع كل مستشار على حدة، فيمكنك أن تسأل سؤال متابعة.</i>"
 )
 
-RESET_DONE = "🧹 <b>بدأنا محادثة جديدة.</b>\n\nنسيت ما سبق في هذه المحادثة."
+RESET_DONE = "🧹 <b>بدأنا محادثة جديدة مع {name}.</b>\n\nنسيت ما سبق في هذه المحادثة معه فقط."
+
+SWITCHED = (
+    "{icon} <b>أنت الآن مع {name}.</b>\n\n"
+    "{description}\n\n"
+    "<i>محادثتك مع كل مستشار محفوظة على حدة، ويمكنك التبديل في أي وقت من لوحة المفاتيح.</i>"
+)
+
+SWITCH_UNSAVED = (
+    "\n\n⚠️ <i>لم أتمكن من حفظ اختيارك، فقد أعود إلى المستشار الافتراضي في الرسالة التالية.</i>"
+)
 
 RESET_UNAVAILABLE = (
     "⚠️ <b>الذاكرة غير متاحة الآن</b>، فلا شيء لأنساه.\n\n"
@@ -132,11 +144,15 @@ class RetrieverProtocol(Protocol):
 class MemoryProtocol(Protocol):
     """Just enough of `ConversationStore` to stand a fake in front of."""
 
-    async def recent(self, chat_id: int, limit: int) -> list[Message]: ...
+    async def recent(self, chat_id: int, limit: int, advisor: str | None = None) -> list[Message]: ...
 
-    async def append(self, chat_id: int, user_id: int, turns: list[Message]) -> None: ...
+    async def append(
+        self, chat_id: int, user_id: int, turns: list[Message], advisor: str | None = None
+    ) -> None: ...
 
-    async def clear(self, chat_id: int) -> int: ...
+    async def clear(self, chat_id: int, advisor: str | None = None) -> int: ...
+
+    async def set_advisor(self, chat_id: int, advisor: str) -> None: ...
 
 
 def _local_reply(request: ChatRequest, text: str) -> tuple[str, str] | None:
@@ -266,7 +282,7 @@ def _previous_question(history: Sequence[Message]) -> str | None:
 
 
 async def _load_history(
-    memory: MemoryProtocol | None, chat_id: int, limit: int, max_chars: int
+    memory: MemoryProtocol | None, chat_id: int, limit: int, max_chars: int, advisor: str | None
 ) -> list[Message]:
     """The recent conversation, or none if memory is off or unreachable.
 
@@ -276,7 +292,7 @@ async def _load_history(
     if memory is None:
         return []
     try:
-        history = await memory.recent(chat_id, limit)
+        history = await memory.recent(chat_id, limit, advisor)
     except Exception:
         log.exception("memory.load_failed")
         return []
@@ -284,7 +300,11 @@ async def _load_history(
 
 
 async def _remember(
-    memory: MemoryProtocol | None, request: ChatRequest, question: str, answer: str
+    memory: MemoryProtocol | None,
+    request: ChatRequest,
+    question: str,
+    answer: str,
+    advisor: str | None = None,
 ) -> None:
     if memory is None:
         return
@@ -293,23 +313,55 @@ async def _remember(
         Message(role="assistant", content=_CITATION.sub("", answer).strip()),
     ]
     try:
-        await memory.append(request.chat_id, request.user_id, turns)
+        await memory.append(request.chat_id, request.user_id, turns, advisor)
     except Exception:
         # The reply is already written; failing to store it must not stop
         # it from being sent.
         log.exception("memory.store_failed")
 
 
-async def _reset(memory: MemoryProtocol | None, chat_id: int) -> tuple[str, str]:
+async def _switch(memory: MemoryProtocol | None, chat_id: int, advisor: Advisor) -> tuple[str, str]:
+    """Make `advisor` this chat's advisor (Phase 15).
+
+    Stored, so the choice survives a restart and the next message - the one
+    that does not come from the keyboard - goes to the right books. If it
+    cannot be stored, the user is told rather than silently left with the
+    default.
+    """
+    reply = SWITCHED.format(icon=advisor.icon, name=advisor.name, description=advisor.description)
+    if memory is None:
+        return reply + SWITCH_UNSAVED, "command.switch"
+    try:
+        await memory.set_advisor(chat_id, advisor.id)
+    except Exception:
+        log.exception("advisor.switch_failed")
+        return reply + SWITCH_UNSAVED, "command.switch"
+    log.info("advisor.switched", advisor=advisor.id)
+    return reply, "command.switch"
+
+
+def _advisors_menu(current: Advisor) -> str:
+    lines = [f"{a.icon} <b>{a.name}</b> — {a.description}" for a in get_registry().advisors]
+    return (
+        f"أنت الآن مع: {current.icon} <b>{current.name}</b>\n\n"
+        + "\n".join(lines)
+        + "\n\n<i>اختر مستشاراً من لوحة المفاتيح أسفل الشاشة.</i>"
+    )
+
+
+async def _reset(
+    memory: MemoryProtocol | None, chat_id: int, advisor: Advisor
+) -> tuple[str, str]:
+    """Forget the conversation with the current advisor only."""
     if memory is None:
         return RESET_UNAVAILABLE, "command.reset"
     try:
-        deleted = await memory.clear(chat_id)
+        deleted = await memory.clear(chat_id, advisor.id)
     except Exception:
         log.exception("memory.clear_failed")
         return RESET_UNAVAILABLE, "command.reset"
-    log.info("memory.cleared", messages=deleted)
-    return RESET_DONE, "command.reset"
+    log.info("memory.cleared", messages=deleted, advisor=advisor.id)
+    return RESET_DONE.format(name=advisor.name), "command.reset"
 
 
 # --- Phase 13: failing in a way the user can act on ---------------------------
@@ -412,6 +464,7 @@ async def _respond_with_agent(
     passage that was actually retrieved: `[7]` when four passages came back
     is removed, not shown as if it could be checked.
     """
+    scope = advisor.id if advisor else None
     documents, has_laws = _library(retriever, advisor)
     try:
         outcome = await run_agent(
@@ -432,7 +485,7 @@ async def _respond_with_agent(
 
     if evidence.searched and not evidence.passages:
         log.info("agent.nothing_found", rounds=outcome.rounds)
-        await _remember(memory, request, text, REMEMBERED_REFUSAL)
+        await _remember(memory, request, text, REMEMBERED_REFUSAL, scope)
         if documents == [] and advisor is not None:
             # Not "nothing matched": there is nothing to match yet.
             return EMPTY_ADVISOR.format(name=advisor.name), "agent.empty_advisor", []
@@ -441,7 +494,7 @@ async def _respond_with_agent(
     if not evidence.searched:
         reply, handled_by = _finish(_visible_answer(result), "agent.direct", result.stop_reason)
         if handled_by == "agent.direct":
-            await _remember(memory, request, text, result.text)
+            await _remember(memory, request, text, result.text, scope)
         return reply, handled_by, []
 
     citations = evidence.citations()
@@ -471,7 +524,7 @@ async def _respond_with_agent(
     reply, handled_by = _finish(body, "agent.grounded", result.stop_reason)
     if handled_by != "agent.grounded":
         return reply, handled_by, []
-    await _remember(memory, request, text, answer)
+    await _remember(memory, request, text, answer, scope)
     log.info(
         "chat.agent_reply",
         rounds=outcome.rounds,
@@ -507,9 +560,23 @@ async def respond(
     again should look like asking for the first time.
     """
     text = request.text.strip()
+    registry = get_registry()
+    current = advisor or registry.default
+    # The memory scope. None only when no advisor was passed at all - the
+    # tests and evals written before Phase 15 - which keeps their history
+    # where it always was.
+    scope = advisor.id if advisor else None
+
+    # Phase 15: a keyboard button names an advisor; pressing it switches.
+    chosen = registry.by_button(text)
+    if chosen is not None:
+        reply, handled_by = await _switch(memory, request.chat_id, chosen)
+        return reply, handled_by, []
+    if text.startswith("/advisors"):
+        return _advisors_menu(current), "command.advisors", []
 
     if text.startswith("/reset"):
-        reply, handled_by = await _reset(memory, request.chat_id)
+        reply, handled_by = await _reset(memory, request.chat_id, current)
         return reply, handled_by, []
 
     local = _local_reply(request, text)
@@ -519,7 +586,9 @@ async def respond(
     if llm is None:
         return MODEL_UNAVAILABLE, "model.unavailable", []
 
-    history = await _load_history(memory, request.chat_id, history_limit, history_chars)
+    history = await _load_history(
+        memory, request.chat_id, history_limit, history_chars, scope
+    )
     log.info("memory.loaded", messages=len(history))
 
     # `grounded=False` is an operator's explicit decision to run without a
@@ -533,7 +602,7 @@ async def respond(
             return _failure(exc)
         reply, handled_by = _finish(_visible_answer(result), "model", result.stop_reason)
         if handled_by == "model":
-            await _remember(memory, request, text, result.text)
+            await _remember(memory, request, text, result.text, scope)
         return reply, handled_by, []
 
     if retriever is None:
@@ -569,7 +638,7 @@ async def respond(
             best_rejected=found.best_rejected_score,
             threshold=found.threshold,
         )
-        await _remember(memory, request, text, REMEMBERED_REFUSAL)
+        await _remember(memory, request, text, REMEMBERED_REFUSAL, scope)
         return NOTHING_FOUND, "retrieval.empty", []
 
     system = build_grounded_prompt(found.as_context())
@@ -595,7 +664,7 @@ async def respond(
 
     reply, handled_by = _finish(body, "model.grounded", result.stop_reason)
     if handled_by == "model.grounded":
-        await _remember(memory, request, text, result.text)
+        await _remember(memory, request, text, result.text, scope)
     else:
         citations = []
 

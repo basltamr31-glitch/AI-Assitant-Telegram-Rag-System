@@ -32,7 +32,7 @@ import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.advisors import get_registry
+from app.advisors import Advisor, get_registry
 from app.api.ratelimit import SlidingWindowLimiter
 from app.api.responder import RATE_LIMITED, respond
 from app.api.schemas import ChatRequest, ChatResponse, HealthResponse
@@ -46,6 +46,34 @@ from app.rag.retrieval import Retriever
 API_VERSION = "0.14.0"
 
 log = get_logger(__name__)
+
+
+async def _chat_advisor(memory, chat_id: int) -> Advisor:
+    """The advisor this chat chose, or the default (Phase 15).
+
+    Read on every message, so a switch is seen by the very next one. If
+    Postgres cannot be asked, the default answers - the user gets a reply
+    from the legal advisor rather than no reply.
+    """
+    registry = get_registry()
+    if memory is None:
+        return registry.default
+    try:
+        return registry.get(await memory.get_advisor(chat_id))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("advisor.lookup_failed", error=type(exc).__name__)
+        return registry.default
+
+
+def advisor_keyboard() -> list[list[str]]:
+    """The advisor buttons, two to a row, for n8n to show under the chat.
+
+    Built from advisors.json, so the button text is exactly what
+    `Registry.by_button` recognises when it is pressed - n8n reads these
+    texts instead of having its own copy that could drift.
+    """
+    buttons = [a.button for a in get_registry().advisors]
+    return [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
 
 
 def _warm(retriever: Retriever) -> None:
@@ -234,6 +262,7 @@ def create_app() -> FastAPI:
                 reply=RATE_LIMITED.format(minutes=wait),
                 handled_by="rate_limited",
                 trace_id=trace_id,
+                keyboard=advisor_keyboard(),
             )
 
         reply, handled_by, sources = await respond(
@@ -246,9 +275,7 @@ def create_app() -> FastAPI:
             history_chars=settings.memory_max_chars,
             agent=settings.agent_enabled,
             agent_max_rounds=settings.agent_max_rounds,
-            # Step 2 of Phase 15: everyone gets the default advisor until the
-            # keyboard lets a chat choose (step 3).
-            advisor=get_registry().default,
+            advisor=await _chat_advisor(request.app.state.memory, payload.chat_id),
         )
 
         log.info(
@@ -267,6 +294,7 @@ def create_app() -> FastAPI:
             handled_by=handled_by,
             trace_id=trace_id,
             sources=sources,
+            keyboard=advisor_keyboard(),
         )
 
     @app.exception_handler(Exception)

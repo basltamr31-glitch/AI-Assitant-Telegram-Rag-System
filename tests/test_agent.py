@@ -81,13 +81,13 @@ class FakeMemory:
     def __init__(self, history=()) -> None:
         self.rows = list(history)
 
-    async def recent(self, chat_id, limit):
+    async def recent(self, chat_id, limit, advisor=None):
         return self.rows[-limit:]
 
-    async def append(self, chat_id, user_id, turns):
+    async def append(self, chat_id, user_id, turns, advisor=None):
         self.rows.extend(turns)
 
-    async def clear(self, chat_id):
+    async def clear(self, chat_id, advisor=None):
         n = len(self.rows)
         self.rows = []
         return n

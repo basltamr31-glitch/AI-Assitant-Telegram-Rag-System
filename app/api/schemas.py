@@ -50,6 +50,10 @@ class ChatResponse(BaseModel):
     # who cannot check a citation has no reason to trust it - and because
     # Phase 14 scores answers against the passages they claim to use.
     sources: list[str] = []
+    # Phase 15: the advisor buttons, as rows of button texts. n8n shows them
+    # as Telegram's reply keyboard; pressing one sends its text back, which
+    # the responder recognises as a switch.
+    keyboard: list[list[str]] = []
 
 
 class HealthResponse(BaseModel):
